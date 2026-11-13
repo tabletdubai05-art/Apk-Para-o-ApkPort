@@ -1,0 +1,6 @@
+{
+  "name": "DroidPort Store",
+  "description": "Loja mobile-first de ports de jogos para Android com catálogo em tempo real e download híbrido P2P + WebSeed.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
