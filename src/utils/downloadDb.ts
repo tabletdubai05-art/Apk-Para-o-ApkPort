@@ -1,13 +1,13 @@
 import type { DownloadTask } from '../types/game';
 
 const DB_NAME = 'droidport_downloads_db';
-const DB_VERSION = 1;
+const DB_VERSION = 2;
 const STORE_TASKS = 'tasks';
 const STORE_CHUNKS = 'chunks';
 
 interface ChunkRecord {
   key: string;
-  gameId: string;
+  taskId: string;
   index: number;
   data: Uint8Array;
 }
@@ -23,13 +23,15 @@ function openDb(): Promise<IDBDatabase> {
 
     request.onupgradeneeded = () => {
       const db = request.result;
-      if (!db.objectStoreNames.contains(STORE_TASKS)) {
-        db.createObjectStore(STORE_TASKS, { keyPath: 'gameId' });
+      if (db.objectStoreNames.contains(STORE_TASKS)) {
+        db.deleteObjectStore(STORE_TASKS);
       }
-      if (!db.objectStoreNames.contains(STORE_CHUNKS)) {
-        const chunkStore = db.createObjectStore(STORE_CHUNKS, { keyPath: 'key' });
-        chunkStore.createIndex('gameId', 'gameId', { unique: false });
+      if (db.objectStoreNames.contains(STORE_CHUNKS)) {
+        db.deleteObjectStore(STORE_CHUNKS);
       }
+      db.createObjectStore(STORE_TASKS, { keyPath: 'taskId' });
+      const chunkStore = db.createObjectStore(STORE_CHUNKS, { keyPath: 'key' });
+      chunkStore.createIndex('taskId', 'taskId', { unique: false });
     };
 
     request.onsuccess = () => resolve(request.result);
@@ -42,7 +44,6 @@ export async function saveDownloadTask(task: DownloadTask): Promise<void> {
     const db = await openDb();
     const tx = db.transaction(STORE_TASKS, 'readwrite');
     const store = tx.objectStore(STORE_TASKS);
-    // Avoid storing ephemeral object URLs across sessions
     const serializable: DownloadTask = {
       ...task,
       blobUrl: undefined,
@@ -77,15 +78,15 @@ export async function loadAllDownloadTasks(): Promise<DownloadTask[]> {
   }
 }
 
-export async function deleteDownloadTask(gameId: string): Promise<void> {
+export async function deleteDownloadTask(taskId: string): Promise<void> {
   try {
     const db = await openDb();
     const tx = db.transaction([STORE_TASKS, STORE_CHUNKS], 'readwrite');
-    tx.objectStore(STORE_TASKS).delete(gameId);
+    tx.objectStore(STORE_TASKS).delete(taskId);
 
     const chunkStore = tx.objectStore(STORE_CHUNKS);
-    const index = chunkStore.index('gameId');
-    const cursorReq = index.openKeyCursor(IDBKeyRange.only(gameId));
+    const index = chunkStore.index('taskId');
+    const cursorReq = index.openKeyCursor(IDBKeyRange.only(taskId));
 
     cursorReq.onsuccess = () => {
       const cursor = cursorReq.result;
@@ -106,7 +107,7 @@ export async function deleteDownloadTask(gameId: string): Promise<void> {
 }
 
 export async function appendDownloadChunk(
-  gameId: string,
+  taskId: string,
   index: number,
   data: Uint8Array
 ): Promise<void> {
@@ -115,8 +116,8 @@ export async function appendDownloadChunk(
     const tx = db.transaction(STORE_CHUNKS, 'readwrite');
     const store = tx.objectStore(STORE_CHUNKS);
     const record: ChunkRecord = {
-      key: `${gameId}_${String(index).padStart(8, '0')}`,
-      gameId,
+      key: `${taskId}_${String(index).padStart(8, '0')}`,
+      taskId,
       index,
       data,
     };
@@ -132,13 +133,13 @@ export async function appendDownloadChunk(
 }
 
 export async function getDownloadChunks(
-  gameId: string
+  taskId: string
 ): Promise<{ chunks: Uint8Array[]; totalBytes: number; nextIndex: number }> {
   try {
     const db = await openDb();
     const tx = db.transaction(STORE_CHUNKS, 'readonly');
-    const index = tx.objectStore(STORE_CHUNKS).index('gameId');
-    const request = index.getAll(IDBKeyRange.only(gameId));
+    const index = tx.objectStore(STORE_CHUNKS).index('taskId');
+    const request = index.getAll(IDBKeyRange.only(taskId));
 
     const records = await new Promise<ChunkRecord[]>((resolve, reject) => {
       request.onsuccess = () => resolve((request.result as ChunkRecord[]) || []);
@@ -157,13 +158,13 @@ export async function getDownloadChunks(
   }
 }
 
-export async function clearDownloadChunksOnly(gameId: string): Promise<void> {
+export async function clearDownloadChunksOnly(taskId: string): Promise<void> {
   try {
     const db = await openDb();
     const tx = db.transaction(STORE_CHUNKS, 'readwrite');
     const chunkStore = tx.objectStore(STORE_CHUNKS);
-    const index = chunkStore.index('gameId');
-    const cursorReq = index.openKeyCursor(IDBKeyRange.only(gameId));
+    const index = chunkStore.index('taskId');
+    const cursorReq = index.openKeyCursor(IDBKeyRange.only(taskId));
 
     cursorReq.onsuccess = () => {
       const cursor = cursorReq.result;

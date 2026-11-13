@@ -26,12 +26,14 @@ import { ProgressView } from './components/ProgressView';
 import { SettingsView } from './components/SettingsView';
 import {
   cancelDownloadTask,
+  restartCleanDownload,
   startHybridDownload,
   triggerSavedBlobDownload,
 } from './services/downloadEngine';
 import type {
   DownloadTask,
   Jogo,
+  JogoArquivo,
   SortOption,
   TabId,
   ViewMode,
@@ -43,9 +45,11 @@ import {
   saveDownloadTask,
 } from './utils/downloadDb';
 import {
+  buildDownloadTaskId,
+  extractFileNameFromUrl,
   parseCategories,
   parseSizeToBytes,
-  sanitizeFileName,
+  sanitizeFolderName,
 } from './utils/formatters';
 
 const SUPABASE_URL = 'https://mfwzkzywxvbbonsshjgh.supabase.co';
@@ -149,7 +153,7 @@ export default function App() {
           speedBytesPerSec: 0,
           peers: 0,
         };
-        restored[task.gameId] = updatedTask;
+        restored[task.taskId] = updatedTask;
 
         if (normalizedStatus !== task.status) {
           void saveDownloadTask(updatedTask);
@@ -206,44 +210,89 @@ export default function App() {
   const handleTaskUpdate = useCallback((task: DownloadTask) => {
     setDownloads((prev) => ({
       ...prev,
-      [task.gameId]: task,
+      [task.taskId]: task,
     }));
   }, []);
 
-  const handleStartDownload = useCallback(
-    (jogo: Jogo) => {
+  const createFileTask = useCallback(
+    (jogo: Jogo, arquivo: JogoArquivo, index: number): DownloadTask => {
       const gameId = String(jogo.id);
-      const task: DownloadTask = {
+      const taskId = buildDownloadTaskId(gameId, arquivo, index);
+      const fallbackBase = sanitizeFolderName(arquivo.nome || jogo.titulo);
+      const fileName = extractFileNameFromUrl(
+        arquivo.url || arquivo.torrent_url,
+        fallbackBase
+      );
+      const tamanho = arquivo.tamanho || jogo.tamanho;
+
+      return {
+        taskId,
         gameId,
         titulo: jogo.titulo,
+        arquivoNome: arquivo.nome,
         capa_url: jogo.capa_url,
         versao: jogo.versao,
-        tamanho: jogo.tamanho,
-        torrent_url: jogo.torrent_url,
-        webseed_url: jogo.webseed_url,
+        tamanho,
+        torrent_url: arquivo.torrent_url ?? null,
+        webseed_url: arquivo.url || null,
         status: 'starting',
-        mode: jogo.torrent_url ? 'webtorrent' : 'http-fallback',
+        mode: arquivo.torrent_url ? 'webtorrent' : 'http-fallback',
         progress: 0,
         downloadedBytes: 0,
-        totalBytes: parseSizeToBytes(jogo.tamanho),
+        totalBytes: parseSizeToBytes(tamanho),
         speedBytesPerSec: 0,
         peers: 0,
-        fileName: sanitizeFileName(`${jogo.titulo}_${jogo.versao}`),
-        updatedAt: Date.now(),
+        fileName,
+        savedPath: undefined,
+        errorMessage: undefined,
+        blobUrl: undefined,
+        updatedAt: Date.now() + index,
       };
+    },
+    []
+  );
+
+  const handleStartFileDownload = useCallback(
+    (jogo: Jogo, arquivo: JogoArquivo, index: number) => {
+      const task = createFileTask(jogo, arquivo, index);
 
       setDownloads((prev) => ({
         ...prev,
-        [gameId]: task,
+        [task.taskId]: task,
       }));
 
-      // Send user directly to the Progresso tab when starting a download
       setSelectedGame(null);
       setActiveTab('progresso');
 
-      void startHybridDownload(task, handleTaskUpdate);
+      void restartCleanDownload(task, handleTaskUpdate);
     },
-    [handleTaskUpdate]
+    [createFileTask, handleTaskUpdate]
+  );
+
+  const handleDownloadAll = useCallback(
+    (jogo: Jogo, arquivos: JogoArquivo[]) => {
+      if (arquivos.length === 0) return;
+
+      const tasks = arquivos.map((arquivo, idx) =>
+        createFileTask(jogo, arquivo, idx)
+      );
+
+      setDownloads((prev) => {
+        const next = { ...prev };
+        for (const t of tasks) {
+          next[t.taskId] = t;
+        }
+        return next;
+      });
+
+      setSelectedGame(null);
+      setActiveTab('progresso');
+
+      for (const task of tasks) {
+        void restartCleanDownload(task, handleTaskUpdate);
+      }
+    },
+    [createFileTask, handleTaskUpdate]
   );
 
   const handleResumeDownload = useCallback(
@@ -253,24 +302,31 @@ export default function App() {
     [handleTaskUpdate]
   );
 
-  const handleCancelDownload = useCallback((gameId: string) => {
-    void cancelDownloadTask(gameId, () => {
+  const handleRetryDownload = useCallback(
+    (task: DownloadTask) => {
+      void restartCleanDownload(task, handleTaskUpdate);
+    },
+    [handleTaskUpdate]
+  );
+
+  const handleCancelDownload = useCallback((taskId: string) => {
+    void cancelDownloadTask(taskId, () => {
       setDownloads((prev) => {
         const next = { ...prev };
-        delete next[gameId];
+        delete next[taskId];
         return next;
       });
     });
   }, []);
 
-  const handleRemoveFinished = useCallback((gameId: string) => {
-    void deleteDownloadTask(gameId);
+  const handleRemoveFinished = useCallback((taskId: string) => {
+    void deleteDownloadTask(taskId);
     setDownloads((prev) => {
       const next = { ...prev };
-      if (next[gameId]?.blobUrl) {
-        URL.revokeObjectURL(next[gameId].blobUrl!);
+      if (next[taskId]?.blobUrl) {
+        URL.revokeObjectURL(next[taskId].blobUrl!);
       }
-      delete next[gameId];
+      delete next[taskId];
       return next;
     });
   }, []);
@@ -282,11 +338,10 @@ export default function App() {
   }, []);
 
   const handleClearCache = useCallback(async () => {
-    // Cancel active downloads first
     const allTasks = Object.values(downloads);
     for (const t of allTasks) {
       if (t.status === 'downloading' || t.status === 'starting') {
-        await cancelDownloadTask(t.gameId);
+        await cancelDownloadTask(t.taskId);
       }
       if (t.blobUrl) {
         URL.revokeObjectURL(t.blobUrl);
@@ -393,12 +448,14 @@ export default function App() {
       <GameDetailsView
         jogo={selectedGame}
         isFavorite={favorites.includes(gameId)}
-        downloadTask={downloads[gameId]}
+        downloads={downloads}
         onBack={() => setSelectedGame(null)}
         onToggleFavorite={toggleFavorite}
-        onStartDownload={handleStartDownload}
+        onStartFileDownload={handleStartFileDownload}
+        onDownloadAll={handleDownloadAll}
         onCancelDownload={handleCancelDownload}
         onResumeDownload={handleResumeDownload}
+        onRetryDownload={handleRetryDownload}
         onSaveCompleted={handleSaveCompleted}
         onGoToProgress={() => {
           setSelectedGame(null);
@@ -795,7 +852,7 @@ export default function App() {
               tasks={downloadList}
               onCancel={handleCancelDownload}
               onResume={handleResumeDownload}
-              onRetry={handleResumeDownload}
+              onRetry={handleRetryDownload}
               onSaveCompleted={handleSaveCompleted}
               onRemoveFinished={handleRemoveFinished}
             />

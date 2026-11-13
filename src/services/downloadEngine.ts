@@ -9,7 +9,11 @@ import {
   getDownloadChunks,
   saveDownloadTask,
 } from '../utils/downloadDb';
-import { parseSizeToBytes, sanitizeFileName } from '../utils/formatters';
+import {
+  extractFileNameFromUrl,
+  parseSizeToBytes,
+  sanitizeFolderName,
+} from '../utils/formatters';
 
 interface WebTorrentFile {
   name: string;
@@ -53,11 +57,6 @@ interface ActiveController {
 
 const activeControllers = new Map<string, ActiveController>();
 let activeNativeCount = 0;
-
-export function openExternalNativeDownload(url?: string | null): void {
-  if (!url) return;
-  window.open(url, '_system');
-}
 
 function triggerBrowserSave(blobUrl: string, fileName: string) {
   const anchor = document.createElement('a');
@@ -109,7 +108,7 @@ async function startCapacitorNativeDownload(
       status: 'error',
       mode: 'capacitor-native',
       speedBytesPerSec: 0,
-      errorMessage: 'Link webseed_url indisponível para download nativo.',
+      errorMessage: 'URL do arquivo indisponível para download nativo.',
       updatedAt: Date.now(),
     };
     await saveDownloadTask(errTask);
@@ -132,22 +131,27 @@ async function startCapacitorNativeDownload(
     }
   };
 
-  activeControllers.set(initialTask.gameId, {
+  activeControllers.set(initialTask.taskId, {
     cancel: () => {
       cancelled = true;
       void cleanupListener();
     },
   });
 
-  const cleanFileName = `${sanitizeFileName(initialTask.titulo).replace(/\.apk$/i, '')}.apk`;
-  const targetPath = cleanFileName;
+  const nomeLimpoDoPort = sanitizeFolderName(initialTask.titulo);
+  const fallbackBase = sanitizeFolderName(initialTask.arquivoNome || initialTask.titulo);
+  const nomeOriginalDoArquivo = extractFileNameFromUrl(url, fallbackBase);
+  const folderPath = `Download/${nomeLimpoDoPort}`;
+  const targetPath = `${folderPath}/${nomeOriginalDoArquivo}`;
+  const displaySavedPath = `Downloads/${nomeLimpoDoPort}/${nomeOriginalDoArquivo}`;
   const fallbackTotalBytes = initialTask.totalBytes || parseSizeToBytes(initialTask.tamanho);
 
   const startingTask: DownloadTask = {
     ...initialTask,
     status: 'downloading',
     mode: 'capacitor-native',
-    fileName: cleanFileName,
+    fileName: nomeOriginalDoArquivo,
+    savedPath: undefined,
     downloadedBytes: 0,
     totalBytes: fallbackTotalBytes,
     progress: 0,
@@ -160,14 +164,23 @@ async function startCapacitorNativeDownload(
   onUpdate(startingTask);
 
   try {
-    // Request public storage permission on Android <= 10 if needed
     try {
       const perm = await Filesystem.checkPermissions();
       if (perm.publicStorage !== 'granted') {
         await Filesystem.requestPermissions();
       }
     } catch {
-      // Android 11+ scoped storage for Documents does not require legacy permission
+      // Ignore if already granted or scoped storage handles it
+    }
+
+    try {
+      await Filesystem.mkdir({
+        path: folderPath,
+        directory: Directory.ExternalStorage,
+        recursive: true,
+      });
+    } catch {
+      // Directory may already exist
     }
 
     let lastBytes = 0;
@@ -176,7 +189,6 @@ async function startCapacitorNativeDownload(
     listenerHandle = await Filesystem.addListener('progress', (status) => {
       if (cancelled) return;
 
-      // Match exact URL or redirected URL when single native download is active
       if (status.url !== url && activeNativeCount > 1) {
         return;
       }
@@ -215,10 +227,10 @@ async function startCapacitorNativeDownload(
       void saveDownloadTask(updated);
     });
 
-    const result = await Filesystem.downloadFile({
+    await Filesystem.downloadFile({
       url,
       path: targetPath,
-      directory: Directory.Documents,
+      directory: Directory.ExternalStorage,
       progress: true,
     });
 
@@ -229,7 +241,7 @@ async function startCapacitorNativeDownload(
       try {
         await Filesystem.deleteFile({
           path: targetPath,
-          directory: Directory.Documents,
+          directory: Directory.ExternalStorage,
         });
       } catch {
         // Ignore cleanup failure
@@ -246,12 +258,12 @@ async function startCapacitorNativeDownload(
       progress: 100,
       speedBytesPerSec: 0,
       peers: 0,
-      savedPath: result.path || `Documents/${targetPath}`,
+      savedPath: displaySavedPath,
       updatedAt: Date.now(),
     };
     await saveDownloadTask(completedTask);
     onUpdate(completedTask);
-    activeControllers.delete(initialTask.gameId);
+    activeControllers.delete(initialTask.taskId);
   } catch (err) {
     await cleanupListener();
     activeNativeCount = Math.max(0, activeNativeCount - 1);
@@ -261,7 +273,7 @@ async function startCapacitorNativeDownload(
     const message =
       err instanceof Error
         ? err.message
-        : 'Falha no download nativo. Use o botão abaixo para baixar pelo navegador ou gerenciador nativo.';
+        : 'Falha no download nativo. Toque em Tentar novamente para reiniciar.';
 
     const erroredTask: DownloadTask = {
       ...startingTask,
@@ -273,7 +285,7 @@ async function startCapacitorNativeDownload(
     };
     await saveDownloadTask(erroredTask);
     onUpdate(erroredTask);
-    activeControllers.delete(initialTask.gameId);
+    activeControllers.delete(initialTask.taskId);
   }
 }
 
@@ -288,7 +300,7 @@ async function startFetchStreamDownload(
       ...initialTask,
       status: 'error',
       speedBytesPerSec: 0,
-      errorMessage: 'Nenhum link de download (WebSeed ou Torrent) disponível.',
+      errorMessage: 'Nenhum link de download disponível para este arquivo.',
       updatedAt: Date.now(),
     };
     await saveDownloadTask(failed);
@@ -297,8 +309,8 @@ async function startFetchStreamDownload(
   }
 
   const abortController = new AbortController();
-  const prevController = activeControllers.get(initialTask.gameId);
-  activeControllers.set(initialTask.gameId, {
+  const prevController = activeControllers.get(initialTask.taskId);
+  activeControllers.set(initialTask.taskId, {
     cancel: () => {
       abortController.abort();
       prevController?.cancel();
@@ -306,7 +318,7 @@ async function startFetchStreamDownload(
   });
 
   try {
-    const saved = await getDownloadChunks(initialTask.gameId);
+    const saved = await getDownloadChunks(initialTask.taskId);
     let existingBytes = saved.totalBytes;
     let nextChunkIndex = saved.nextIndex;
     const accumulatedChunks: Uint8Array[] = [...saved.chunks];
@@ -327,7 +339,7 @@ async function startFetchStreamDownload(
     }
 
     if (existingBytes > 0 && response.status === 200) {
-      await clearDownloadChunksOnly(initialTask.gameId);
+      await clearDownloadChunksOnly(initialTask.taskId);
       existingBytes = 0;
       nextChunkIndex = 0;
       accumulatedChunks.length = 0;
@@ -369,7 +381,7 @@ async function startFetchStreamDownload(
         merged.set(part, offset);
         offset += part.byteLength;
       }
-      await appendDownloadChunk(initialTask.gameId, nextChunkIndex++, merged);
+      await appendDownloadChunk(initialTask.taskId, nextChunkIndex++, merged);
       pendingBuffer = [];
       pendingSize = 0;
     };
@@ -447,9 +459,10 @@ async function startFetchStreamDownload(
           chunk.byteOffset + chunk.byteLength
         ) as ArrayBuffer
     );
-    const finalBlob = new Blob(blobParts, {
-      type: 'application/vnd.android.package-archive',
-    });
+    const mimeType = initialTask.fileName.toLowerCase().endsWith('.apk')
+      ? 'application/vnd.android.package-archive'
+      : 'application/octet-stream';
+    const finalBlob = new Blob(blobParts, { type: mimeType });
     const blobUrl = URL.createObjectURL(finalBlob);
 
     const completedTask: DownloadTask = {
@@ -466,10 +479,10 @@ async function startFetchStreamDownload(
     };
 
     await saveDownloadTask(completedTask);
-    await clearDownloadChunksOnly(initialTask.gameId);
+    await clearDownloadChunksOnly(initialTask.taskId);
     onUpdate(completedTask);
     triggerBrowserSave(blobUrl, completedTask.fileName);
-    activeControllers.delete(initialTask.gameId);
+    activeControllers.delete(initialTask.taskId);
   } catch (err) {
     if (isCancelled() || (err instanceof DOMException && err.name === 'AbortError')) {
       return;
@@ -489,7 +502,7 @@ async function startFetchStreamDownload(
     };
     await saveDownloadTask(erroredTask);
     onUpdate(erroredTask);
-    activeControllers.delete(initialTask.gameId);
+    activeControllers.delete(initialTask.taskId);
   }
 }
 
@@ -497,9 +510,8 @@ export async function startHybridDownload(
   task: DownloadTask,
   onUpdate: TaskUpdateCallback
 ): Promise<void> {
-  activeControllers.get(task.gameId)?.cancel();
+  activeControllers.get(task.taskId)?.cancel();
 
-  // Inside native Android/iOS APK (Capacitor), bypass WebView fetch/RAM limits via Filesystem.downloadFile
   if (Capacitor.isNativePlatform() && task.webseed_url) {
     await startCapacitorNativeDownload(task, onUpdate);
     return;
@@ -535,7 +547,7 @@ export async function startHybridDownload(
     client = null;
   };
 
-  activeControllers.set(task.gameId, {
+  activeControllers.set(task.taskId, {
     cancel: () => {
       cancelled = true;
       cleanupWebTorrent();
@@ -551,7 +563,7 @@ export async function startHybridDownload(
   await saveDownloadTask(initialTask);
   onUpdate(initialTask);
 
-  const existingChunks = await getDownloadChunks(task.gameId);
+  const existingChunks = await getDownloadChunks(task.taskId);
   if (!task.torrent_url || existingChunks.totalBytes > 0) {
     await startFetchStreamDownload(
       {
@@ -579,7 +591,7 @@ export async function startHybridDownload(
       const errTask: DownloadTask = {
         ...initialTask,
         status: 'error',
-        errorMessage: 'Motor WebTorrent indisponível e sem WebSeed configurada.',
+        errorMessage: 'Motor WebTorrent indisponível e sem URL direta configurada.',
         updatedAt: Date.now(),
       };
       await saveDownloadTask(errTask);
@@ -606,7 +618,7 @@ export async function startHybridDownload(
       const errTask: DownloadTask = {
         ...initialTask,
         status: 'error',
-        errorMessage: 'Trackers P2P bloqueados e nenhuma WebSeed disponível.',
+        errorMessage: 'Trackers P2P bloqueados e nenhuma URL direta disponível.',
         updatedAt: Date.now(),
       };
       await saveDownloadTask(errTask);
@@ -714,7 +726,7 @@ export async function startHybridDownload(
           if (blobUrl) {
             triggerBrowserSave(blobUrl, completed.fileName);
           }
-          activeControllers.delete(task.gameId);
+          activeControllers.delete(task.taskId);
         };
 
         if (targetFile) {
@@ -744,16 +756,52 @@ export async function startHybridDownload(
 }
 
 export async function cancelDownloadTask(
-  gameId: string,
+  taskId: string,
   onRemove?: () => void
 ): Promise<void> {
-  const controller = activeControllers.get(gameId);
+  const controller = activeControllers.get(taskId);
   if (controller) {
     controller.cancel();
-    activeControllers.delete(gameId);
+    activeControllers.delete(taskId);
   }
-  await deleteDownloadTask(gameId);
+  await deleteDownloadTask(taskId);
   onRemove?.();
+}
+
+export async function restartCleanDownload(
+  task: DownloadTask,
+  onUpdate: TaskUpdateCallback
+): Promise<void> {
+  const controller = activeControllers.get(task.taskId);
+  if (controller) {
+    controller.cancel();
+    activeControllers.delete(task.taskId);
+  }
+  if (task.blobUrl) {
+    try {
+      URL.revokeObjectURL(task.blobUrl);
+    } catch {
+      // Ignore revoke failure
+    }
+  }
+  await clearDownloadChunksOnly(task.taskId);
+
+  const resetTask: DownloadTask = {
+    ...task,
+    status: 'starting',
+    progress: 0,
+    downloadedBytes: 0,
+    speedBytesPerSec: 0,
+    peers: 0,
+    savedPath: undefined,
+    errorMessage: undefined,
+    blobUrl: undefined,
+    updatedAt: Date.now(),
+  };
+  await saveDownloadTask(resetTask);
+  onUpdate(resetTask);
+
+  await startHybridDownload(resetTask, onUpdate);
 }
 
 export function triggerSavedBlobDownload(blobUrl: string, fileName: string): void {

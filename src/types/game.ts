@@ -1,3 +1,10 @@
+export interface JogoArquivo {
+  nome: string;
+  tamanho?: string;
+  url: string;
+  torrent_url?: string | null;
+}
+
 export interface Jogo {
   id: number | string;
   titulo: string;
@@ -11,6 +18,7 @@ export interface Jogo {
   fotos_urls?: string | string[] | null;
   torrent_url?: string | null;
   webseed_url?: string | null;
+  arquivos?: JogoArquivo[] | string | null;
   created_at?: string;
 }
 
@@ -31,8 +39,10 @@ export type DownloadStatus =
 export type DownloadMode = 'webtorrent' | 'http-fallback' | 'capacitor-native';
 
 export interface DownloadTask {
+  taskId: string;
   gameId: string;
   titulo: string;
+  arquivoNome: string;
   capa_url: string;
   versao: string;
   tamanho: string;

@@ -1,36 +1,39 @@
 import { useState } from 'react';
 import {
   ArrowLeft,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Download,
-  ExternalLink,
+  FileArchive,
   Heart,
   Play,
   RotateCcw,
-  Users,
   X,
 } from 'lucide-react';
-import { openExternalNativeDownload } from '../services/downloadEngine';
-import type { DownloadTask, Jogo } from '../types/game';
+import type { DownloadTask, Jogo, JogoArquivo } from '../types/game';
 import {
+  buildDownloadTaskId,
   formatBytes,
   formatCategoriesDot,
   formatSpeedMBs,
   parsePhotos,
   parseVideoSource,
+  resolveGameFiles,
 } from '../utils/formatters';
 import { GameCover } from './GameCover';
 
 interface GameDetailsViewProps {
   jogo: Jogo;
   isFavorite: boolean;
-  downloadTask?: DownloadTask;
+  downloads: Record<string, DownloadTask>;
   onBack: () => void;
   onToggleFavorite: (id: string) => void;
-  onStartDownload: (jogo: Jogo) => void;
-  onCancelDownload: (gameId: string) => void;
+  onStartFileDownload: (jogo: Jogo, arquivo: JogoArquivo, index: number) => void;
+  onDownloadAll: (jogo: Jogo, arquivos: JogoArquivo[]) => void;
+  onCancelDownload: (taskId: string) => void;
   onResumeDownload: (task: DownloadTask) => void;
+  onRetryDownload: (task: DownloadTask) => void;
   onSaveCompleted: (task: DownloadTask) => void;
   onGoToProgress: () => void;
 }
@@ -38,12 +41,14 @@ interface GameDetailsViewProps {
 export function GameDetailsView({
   jogo,
   isFavorite,
-  downloadTask,
+  downloads,
   onBack,
   onToggleFavorite,
-  onStartDownload,
+  onStartFileDownload,
+  onDownloadAll,
   onCancelDownload,
   onResumeDownload,
+  onRetryDownload,
   onSaveCompleted,
   onGoToProgress,
 }: GameDetailsViewProps) {
@@ -52,12 +57,7 @@ export function GameDetailsView({
   const categoriesDot = formatCategoriesDot(jogo.categoria);
   const video = parseVideoSource(jogo.video_url);
   const photos = parsePhotos(jogo.fotos_urls);
-
-  const isDownloading =
-    downloadTask?.status === 'starting' || downloadTask?.status === 'downloading';
-  const isPaused = downloadTask?.status === 'paused';
-  const isCompleted = downloadTask?.status === 'completed';
-  const externalUrl = jogo.webseed_url || jogo.torrent_url;
+  const files = resolveGameFiles(jogo);
 
   return (
     <div className="min-h-screen bg-[#0F0E13] text-white pb-28">
@@ -106,150 +106,181 @@ export function GameDetailsView({
             )}
           </div>
 
-          <div className="p-5 sm:p-6 -mt-8 relative z-10 space-y-4">
-            <div className="flex flex-col sm:flex-row sm:items-end justify-between gap-4">
-              <div className="space-y-1.5">
-                <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight text-balance">
-                  {jogo.titulo}
-                </h1>
-                <p className="text-sm font-medium text-[#8B5CF6]">{categoriesDot}</p>
-                <p className="text-sm text-[#9CA3AF] font-mono-nums">
-                  {jogo.versao} • {jogo.tamanho}
-                </p>
-              </div>
+          <div className="p-5 sm:p-6 -mt-8 relative z-10 space-y-5">
+            <div className="space-y-1.5">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight text-balance">
+                {jogo.titulo}
+              </h1>
+              <p className="text-sm font-medium text-[#8B5CF6]">{categoriesDot}</p>
+              <p className="text-sm text-[#9CA3AF] font-mono-nums">
+                {jogo.versao} • {jogo.tamanho}
+              </p>
             </div>
 
-            {/* Download Action / Live Progress */}
-            <div className="pt-1 space-y-2.5">
-              {!downloadTask || downloadTask.status === 'cancelled' ? (
-                <button
-                  type="button"
-                  onClick={() => onStartDownload(jogo)}
-                  className="w-full min-h-[52px] px-6 py-3.5 rounded-2xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] text-white font-bold text-base flex items-center justify-center gap-2.5 shadow-lg shadow-[#6366F1]/25 active:scale-[0.985] transition-all"
-                >
-                  <Download className="w-5 h-5" />
-                  <span>Baixar APK</span>
-                </button>
+            {/* Arquivos Disponíveis */}
+            <div className="space-y-3 pt-1">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-sm font-bold text-white">
+                  Arquivos Disponíveis ({files.length})
+                </h2>
+
+                {files.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => onDownloadAll(jogo, files)}
+                    className="min-h-[44px] px-4 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] text-white text-xs sm:text-sm font-bold inline-flex items-center gap-2 shadow-md shadow-[#6366F1]/25 active:scale-[0.98] transition-all shrink-0"
+                  >
+                    <Download className="w-4 h-4" />
+                    <span>Baixar Todos</span>
+                  </button>
+                )}
+              </div>
+
+              {files.length === 0 ? (
+                <div className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-4 text-xs text-[#9CA3AF]">
+                  Nenhum arquivo disponível para download neste port.
+                </div>
               ) : (
-                <div className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-4 space-y-3">
-                  <div className="flex items-center justify-between gap-2 text-xs">
-                    <span className="font-semibold text-white">
-                      {downloadTask.status === 'starting' && 'Conectando ao enxame P2P...'}
-                      {downloadTask.status === 'downloading' &&
-                        (downloadTask.mode === 'capacitor-native'
-                          ? 'Baixando nativamente para Documentos'
-                          : downloadTask.mode === 'webtorrent'
-                          ? 'Baixando via P2P + WebSeed'
-                          : 'Baixando via WebSeed (HTTP Direto)')}
-                      {isPaused && 'Download pausado (salvo no IndexedDB)'}
-                      {isCompleted &&
-                        (downloadTask.savedPath
-                          ? `Salvo em ${downloadTask.savedPath}`
-                          : 'Download concluído')}
-                      {downloadTask.status === 'error' && 'Erro no download'}
-                    </span>
-                    <span className="font-mono-nums font-bold text-[#8B5CF6]">
-                      {downloadTask.progress.toFixed(1)}%
-                    </span>
-                  </div>
+                <div className="space-y-2.5">
+                  {files.map((arquivo, index) => {
+                    const taskId = buildDownloadTaskId(gameId, arquivo, index);
+                    const task = downloads[taskId];
+                    const isDownloading =
+                      task?.status === 'starting' || task?.status === 'downloading';
+                    const isPaused = task?.status === 'paused';
+                    const isCompleted = task?.status === 'completed';
+                    const isError = task?.status === 'error';
 
-                  {/* Progress Bar */}
-                  <div className="w-full h-2.5 rounded-full bg-[#1B1924] overflow-hidden border border-[#2A2738]">
-                    <div
-                      className="h-full rounded-full bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] transition-all duration-200"
-                      style={{ width: `${Math.min(100, Math.max(0, downloadTask.progress))}%` }}
-                    />
-                  </div>
+                    return (
+                      <div
+                        key={taskId}
+                        className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-3.5 space-y-2.5"
+                      >
+                        <div className="flex items-center justify-between gap-3">
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-xl bg-[#1B1924] border border-[#2A2738] flex items-center justify-center text-[#8B5CF6] shrink-0">
+                              <FileArchive className="w-5 h-5" />
+                            </div>
+                            <div className="min-w-0">
+                              <p className="text-sm font-bold text-white truncate">
+                                {arquivo.nome}
+                              </p>
+                              <p className="text-xs text-[#9CA3AF] font-mono-nums">
+                                {arquivo.tamanho || jogo.tamanho || 'Tamanho variável'}
+                              </p>
+                            </div>
+                          </div>
 
-                  {/* Metrics */}
-                  <div className="flex flex-wrap items-center justify-between gap-2 text-xs text-[#9CA3AF] font-mono-nums">
-                    <span>
-                      {formatBytes(downloadTask.downloadedBytes)} /{' '}
-                      {downloadTask.totalBytes > 0
-                        ? formatBytes(downloadTask.totalBytes)
-                        : jogo.tamanho}
-                    </span>
-                    <div className="flex items-center gap-3">
-                      {isDownloading && (
-                        <>
-                          <span>{formatSpeedMBs(downloadTask.speedBytesPerSec)}</span>
-                          {downloadTask.mode !== 'capacitor-native' && (
-                            <span className="inline-flex items-center gap-1 text-[#A5B4FC]">
-                              <Users className="w-3.5 h-3.5" />
-                              {downloadTask.peers} peers
-                            </span>
+                          {(!task || task.status === 'cancelled') && (
+                            <button
+                              type="button"
+                              onClick={() => onStartFileDownload(jogo, arquivo, index)}
+                              className="min-h-[44px] px-4 rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 shrink-0 transition-colors"
+                            >
+                              <Download className="w-4 h-4" />
+                              <span>Baixar</span>
+                            </button>
                           )}
-                        </>
-                      )}
-                    </div>
-                  </div>
 
-                  {downloadTask.errorMessage && (
-                    <p className="text-xs text-rose-400">{downloadTask.errorMessage}</p>
-                  )}
+                          {isDownloading && (
+                            <button
+                              type="button"
+                              onClick={() => onCancelDownload(taskId)}
+                              className="min-h-[44px] px-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold shrink-0"
+                            >
+                              Cancelar
+                            </button>
+                          )}
 
-                  <div className="flex flex-wrap items-center gap-2 pt-1">
-                    {isPaused && (
-                      <button
-                        type="button"
-                        onClick={() => onResumeDownload(downloadTask)}
-                        className="flex-1 min-h-[44px] px-4 rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <Play className="w-4 h-4" />
-                        <span>Retomar</span>
-                      </button>
-                    )}
+                          {isPaused && (
+                            <button
+                              type="button"
+                              onClick={() => onResumeDownload(task)}
+                              className="min-h-[44px] px-3.5 rounded-xl bg-[#6366F1] text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
+                            >
+                              <Play className="w-3.5 h-3.5" />
+                              <span>Retomar</span>
+                            </button>
+                          )}
 
-                    {downloadTask.status === 'error' && (
-                      <>
-                        {externalUrl && (
-                          <button
-                            type="button"
-                            onClick={() => openExternalNativeDownload(externalUrl)}
-                            className="w-full min-h-[44px] px-4 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
-                          >
-                            <ExternalLink className="w-4 h-4 shrink-0" />
-                            <span>Baixar pelo Navegador / Gerenciador Nativo</span>
-                          </button>
+                          {isError && (
+                            <button
+                              type="button"
+                              onClick={() => onRetryDownload(task)}
+                              className="min-h-[44px] px-3.5 rounded-xl bg-[#6366F1] text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>Tentar novamente</span>
+                            </button>
+                          )}
+
+                          {isCompleted && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                task.blobUrl
+                                  ? onSaveCompleted(task)
+                                  : onRetryDownload(task)
+                              }
+                              className="min-h-[44px] px-3.5 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
+                            >
+                              <RotateCcw className="w-3.5 h-3.5" />
+                              <span>{task.blobUrl ? 'Salvar' : 'Baixar novamente'}</span>
+                            </button>
+                          )}
+                        </div>
+
+                        {task && task.status !== 'cancelled' && (
+                          <div className="space-y-1.5 pt-1 border-t border-[#2A2738]/70">
+                            <div className="w-full h-1.5 rounded-full bg-[#1B1924] overflow-hidden">
+                              <div
+                                className={`h-full rounded-full transition-all duration-200 ${
+                                  isCompleted
+                                    ? 'bg-emerald-500'
+                                    : isError
+                                    ? 'bg-rose-500'
+                                    : 'bg-gradient-to-r from-[#6366F1] to-[#8B5CF6]'
+                                }`}
+                                style={{
+                                  width: `${Math.min(100, Math.max(0, task.progress))}%`,
+                                }}
+                              />
+                            </div>
+                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono-nums text-[#9CA3AF]">
+                              <span className="inline-flex items-center gap-1.5 truncate max-w-[70%]">
+                                {isCompleted && (
+                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
+                                )}
+                                <span className="truncate">
+                                  {isCompleted && task.savedPath
+                                    ? `Salvo em: ${task.savedPath}`
+                                    : isError
+                                    ? task.errorMessage || 'Erro no download'
+                                    : `${formatBytes(task.downloadedBytes)} / ${
+                                        task.totalBytes > 0
+                                          ? formatBytes(task.totalBytes)
+                                          : arquivo.tamanho || jogo.tamanho
+                                      }${
+                                        isDownloading
+                                          ? ` • ${formatSpeedMBs(task.speedBytesPerSec)}`
+                                          : ''
+                                      }`}
+                                </span>
+                              </span>
+
+                              <button
+                                type="button"
+                                onClick={onGoToProgress}
+                                className="text-[#8B5CF6] font-semibold hover:underline shrink-0"
+                              >
+                                {task.progress.toFixed(1)}% • Ver fila
+                              </button>
+                            </div>
+                          </div>
                         )}
-                        <button
-                          type="button"
-                          onClick={() => onStartDownload(jogo)}
-                          className="flex-1 min-h-[44px] px-4 rounded-xl bg-[#2A2738] hover:bg-[#353146] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
-                        >
-                          <RotateCcw className="w-4 h-4" />
-                          <span>Tentar novamente</span>
-                        </button>
-                      </>
-                    )}
-
-                    {isCompleted && downloadTask.blobUrl && (
-                      <button
-                        type="button"
-                        onClick={() => onSaveCompleted(downloadTask)}
-                        className="flex-1 min-h-[44px] px-4 rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <Download className="w-4 h-4" />
-                        <span>Salvar APK novamente</span>
-                      </button>
-                    )}
-
-                    <button
-                      type="button"
-                      onClick={onGoToProgress}
-                      className="min-h-[44px] px-4 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-sm font-medium transition-colors"
-                    >
-                      Progresso
-                    </button>
-
-                    <button
-                      type="button"
-                      onClick={() => onCancelDownload(gameId)}
-                      className="min-h-[44px] px-4 rounded-xl bg-rose-500/10 border border-rose-500/30 hover:bg-rose-500/20 text-rose-400 text-sm font-medium transition-colors"
-                    >
-                      Cancelar
-                    </button>
-                  </div>
+                      </div>
+                    );
+                  })}
                 </div>
               )}
             </div>

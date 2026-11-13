@@ -1,3 +1,5 @@
+import type { Jogo, JogoArquivo } from '../types/game';
+
 export function parseCategories(categoria?: string | null): string[] {
   if (!categoria) return [];
   return categoria
@@ -92,11 +94,88 @@ export function parseVideoSource(videoUrl?: string | null): ParsedVideo | null {
   }
 }
 
-export function sanitizeFileName(title: string): string {
+export function sanitizeFolderName(title: string): string {
   const cleaned = title
     .normalize('NFD')
     .replace(/[\u0300-\u036f]/g, '')
-    .replace(/[^a-zA-Z0-9-_]+/g, '_')
+    .replace(/[^a-zA-Z0-9]+/g, '_')
     .replace(/^_+|_+$/g, '');
-  return `${cleaned || 'jogo_android'}.apk`;
+  return cleaned || 'Jogo_Android';
+}
+
+export function extractFileNameFromUrl(
+  url?: string | null,
+  fallbackBaseName = 'jogo'
+): string {
+  if (url) {
+    try {
+      const parsed = new URL(url);
+      const lastSegment = parsed.pathname.split('/').filter(Boolean).pop();
+      if (lastSegment) {
+        const decoded = decodeURIComponent(lastSegment).trim();
+        if (/^[^/\\]+\.[a-zA-Z0-9]{2,6}$/.test(decoded)) {
+          return decoded.replace(/[<>:"/\\|?*]+/g, '_');
+        }
+      }
+    } catch {
+      const cleanPath = url.split('?')[0].split('#')[0];
+      const lastSegment = cleanPath.split('/').filter(Boolean).pop();
+      if (lastSegment && /^[^/\\]+\.[a-zA-Z0-9]{2,6}$/.test(lastSegment)) {
+        return lastSegment.replace(/[<>:"/\\|?*]+/g, '_');
+      }
+    }
+  }
+  return `${fallbackBaseName}.apk`;
+}
+
+export function sanitizeFileName(title: string): string {
+  return `${sanitizeFolderName(title)}.apk`;
+}
+
+export function resolveGameFiles(jogo: Jogo): JogoArquivo[] {
+  let rawArquivos = jogo.arquivos;
+
+  if (typeof rawArquivos === 'string') {
+    try {
+      rawArquivos = JSON.parse(rawArquivos) as JogoArquivo[];
+    } catch {
+      rawArquivos = null;
+    }
+  }
+
+  if (Array.isArray(rawArquivos) && rawArquivos.length > 0) {
+    const valid = rawArquivos
+      .filter((item) => item && (typeof item.url === 'string' && item.url.trim() !== ''))
+      .map((item, idx) => ({
+        nome: (item.nome || `Arquivo ${idx + 1}`).trim(),
+        tamanho: (item.tamanho || jogo.tamanho || '').trim(),
+        url: item.url.trim(),
+        torrent_url: item.torrent_url ?? (idx === 0 ? jogo.torrent_url : null),
+      }));
+
+    if (valid.length > 0) {
+      return valid;
+    }
+  }
+
+  if (jogo.webseed_url || jogo.torrent_url) {
+    return [
+      {
+        nome: 'APK Principal',
+        tamanho: jogo.tamanho || '',
+        url: jogo.webseed_url?.trim() || '',
+        torrent_url: jogo.torrent_url || null,
+      },
+    ];
+  }
+
+  return [];
+}
+
+export function buildDownloadTaskId(
+  gameId: string | number,
+  arquivo: JogoArquivo,
+  index: number
+): string {
+  return `${String(gameId)}__${index}__${sanitizeFolderName(arquivo.nome)}`;
 }
