@@ -1,3 +1,6 @@
+import { Capacitor } from '@capacitor/core';
+import { Directory, Filesystem } from '@capacitor/filesystem';
+import type { PluginListenerHandle } from '@capacitor/core';
 import type { DownloadTask } from '../types/game';
 import {
   appendDownloadChunk,
@@ -6,7 +9,7 @@ import {
   getDownloadChunks,
   saveDownloadTask,
 } from '../utils/downloadDb';
-import { parseSizeToBytes } from '../utils/formatters';
+import { parseSizeToBytes, sanitizeFileName } from '../utils/formatters';
 
 interface WebTorrentFile {
   name: string;
@@ -49,6 +52,12 @@ interface ActiveController {
 }
 
 const activeControllers = new Map<string, ActiveController>();
+let activeNativeCount = 0;
+
+export function openExternalNativeDownload(url?: string | null): void {
+  if (!url) return;
+  window.open(url, '_system');
+}
 
 function triggerBrowserSave(blobUrl: string, fileName: string) {
   const anchor = document.createElement('a');
@@ -66,13 +75,11 @@ async function ensureWebTorrentLoaded(): Promise<typeof window.WebTorrent | null
   if (typeof window === 'undefined') return null;
   if (window.WebTorrent) return window.WebTorrent;
 
-  // Wait briefly if deferred script is still loading
   for (let i = 0; i < 15; i++) {
     await new Promise((r) => setTimeout(r, 150));
     if (window.WebTorrent) return window.WebTorrent;
   }
 
-  // Attempt dynamic script injection if CDN script wasn't loaded yet
   return new Promise((resolve) => {
     const existing = document.querySelector('script[data-webtorrent-cdn]');
     if (existing) {
@@ -89,6 +96,185 @@ async function ensureWebTorrentLoaded(): Promise<typeof window.WebTorrent | null
     script.onerror = () => resolve(null);
     document.head.appendChild(script);
   });
+}
+
+async function startCapacitorNativeDownload(
+  initialTask: DownloadTask,
+  onUpdate: TaskUpdateCallback
+): Promise<void> {
+  const url = initialTask.webseed_url;
+  if (!url) {
+    const errTask: DownloadTask = {
+      ...initialTask,
+      status: 'error',
+      mode: 'capacitor-native',
+      speedBytesPerSec: 0,
+      errorMessage: 'Link webseed_url indisponível para download nativo.',
+      updatedAt: Date.now(),
+    };
+    await saveDownloadTask(errTask);
+    onUpdate(errTask);
+    return;
+  }
+
+  let cancelled = false;
+  let listenerHandle: PluginListenerHandle | null = null;
+  activeNativeCount += 1;
+
+  const cleanupListener = async () => {
+    if (listenerHandle) {
+      try {
+        await listenerHandle.remove();
+      } catch {
+        // Ignore listener removal errors
+      }
+      listenerHandle = null;
+    }
+  };
+
+  activeControllers.set(initialTask.gameId, {
+    cancel: () => {
+      cancelled = true;
+      void cleanupListener();
+    },
+  });
+
+  const cleanFileName = `${sanitizeFileName(initialTask.titulo).replace(/\.apk$/i, '')}.apk`;
+  const targetPath = cleanFileName;
+  const fallbackTotalBytes = initialTask.totalBytes || parseSizeToBytes(initialTask.tamanho);
+
+  const startingTask: DownloadTask = {
+    ...initialTask,
+    status: 'downloading',
+    mode: 'capacitor-native',
+    fileName: cleanFileName,
+    downloadedBytes: 0,
+    totalBytes: fallbackTotalBytes,
+    progress: 0,
+    speedBytesPerSec: 0,
+    peers: 0,
+    errorMessage: undefined,
+    updatedAt: Date.now(),
+  };
+  await saveDownloadTask(startingTask);
+  onUpdate(startingTask);
+
+  try {
+    // Request public storage permission on Android <= 10 if needed
+    try {
+      const perm = await Filesystem.checkPermissions();
+      if (perm.publicStorage !== 'granted') {
+        await Filesystem.requestPermissions();
+      }
+    } catch {
+      // Android 11+ scoped storage for Documents does not require legacy permission
+    }
+
+    let lastBytes = 0;
+    let lastTime = performance.now();
+
+    listenerHandle = await Filesystem.addListener('progress', (status) => {
+      if (cancelled) return;
+
+      // Match exact URL or redirected URL when single native download is active
+      if (status.url !== url && activeNativeCount > 1) {
+        return;
+      }
+
+      const now = performance.now();
+      const elapsedSec = (now - lastTime) / 1000;
+      const downloaded = status.bytes || 0;
+      const total =
+        status.contentLength && status.contentLength > 0
+          ? status.contentLength
+          : fallbackTotalBytes;
+
+      let speed = startingTask.speedBytesPerSec;
+      if (elapsedSec >= 0.25) {
+        const deltaBytes = Math.max(0, downloaded - lastBytes);
+        speed = deltaBytes / elapsedSec;
+        lastBytes = downloaded;
+        lastTime = now;
+      }
+
+      const progress =
+        total > 0 ? Math.min(99.9, (downloaded / total) * 100) : 0;
+
+      const updated: DownloadTask = {
+        ...startingTask,
+        status: 'downloading',
+        mode: 'capacitor-native',
+        downloadedBytes: downloaded,
+        totalBytes: Math.max(total, downloaded),
+        progress,
+        speedBytesPerSec: speed,
+        peers: 0,
+        updatedAt: Date.now(),
+      };
+      onUpdate(updated);
+      void saveDownloadTask(updated);
+    });
+
+    const result = await Filesystem.downloadFile({
+      url,
+      path: targetPath,
+      directory: Directory.Documents,
+      progress: true,
+    });
+
+    await cleanupListener();
+    activeNativeCount = Math.max(0, activeNativeCount - 1);
+
+    if (cancelled) {
+      try {
+        await Filesystem.deleteFile({
+          path: targetPath,
+          directory: Directory.Documents,
+        });
+      } catch {
+        // Ignore cleanup failure
+      }
+      return;
+    }
+
+    const completedTask: DownloadTask = {
+      ...startingTask,
+      status: 'completed',
+      mode: 'capacitor-native',
+      downloadedBytes: fallbackTotalBytes,
+      totalBytes: fallbackTotalBytes,
+      progress: 100,
+      speedBytesPerSec: 0,
+      peers: 0,
+      savedPath: result.path || `Documents/${targetPath}`,
+      updatedAt: Date.now(),
+    };
+    await saveDownloadTask(completedTask);
+    onUpdate(completedTask);
+    activeControllers.delete(initialTask.gameId);
+  } catch (err) {
+    await cleanupListener();
+    activeNativeCount = Math.max(0, activeNativeCount - 1);
+
+    if (cancelled) return;
+
+    const message =
+      err instanceof Error
+        ? err.message
+        : 'Falha no download nativo. Use o botão abaixo para baixar pelo navegador ou gerenciador nativo.';
+
+    const erroredTask: DownloadTask = {
+      ...startingTask,
+      status: 'error',
+      mode: 'capacitor-native',
+      speedBytesPerSec: 0,
+      errorMessage: message,
+      updatedAt: Date.now(),
+    };
+    await saveDownloadTask(erroredTask);
+    onUpdate(erroredTask);
+    activeControllers.delete(initialTask.gameId);
+  }
 }
 
 async function startFetchStreamDownload(
@@ -120,7 +306,6 @@ async function startFetchStreamDownload(
   });
 
   try {
-    // Check IndexedDB for existing partial chunks to resume
     const saved = await getDownloadChunks(initialTask.gameId);
     let existingBytes = saved.totalBytes;
     let nextChunkIndex = saved.nextIndex;
@@ -141,7 +326,6 @@ async function startFetchStreamDownload(
       throw new Error(`HTTP ${response.status} ao baixar arquivo.`);
     }
 
-    // If server returned 200 OK instead of 206 Partial Content, restart from 0
     if (existingBytes > 0 && response.status === 200) {
       await clearDownloadChunksOnly(initialTask.gameId);
       existingBytes = 0;
@@ -173,7 +357,6 @@ async function startFetchStreamDownload(
     let windowStart = performance.now();
     let lastUiUpdate = 0;
 
-    // Buffer small reads into ~512KB chunks before persisting to IndexedDB
     let pendingBuffer: Uint8Array[] = [];
     let pendingSize = 0;
     const CHUNK_PERSIST_THRESHOLD = 512 * 1024;
@@ -258,7 +441,11 @@ async function startFetchStreamDownload(
     await flushPendingChunks();
 
     const blobParts = accumulatedChunks.map(
-      (chunk) => chunk.buffer.slice(chunk.byteOffset, chunk.byteOffset + chunk.byteLength) as ArrayBuffer
+      (chunk) =>
+        chunk.buffer.slice(
+          chunk.byteOffset,
+          chunk.byteOffset + chunk.byteLength
+        ) as ArrayBuffer
     );
     const finalBlob = new Blob(blobParts, {
       type: 'application/vnd.android.package-archive',
@@ -291,7 +478,7 @@ async function startFetchStreamDownload(
     const message =
       err instanceof Error
         ? err.message
-        : 'Falha no download direto (possível bloqueio de CORS ou rede).';
+        : 'Falha no download direto (possível bloqueio de CORS ou redirecionamento).';
 
     const erroredTask: DownloadTask = {
       ...initialTask,
@@ -310,8 +497,13 @@ export async function startHybridDownload(
   task: DownloadTask,
   onUpdate: TaskUpdateCallback
 ): Promise<void> {
-  // Cancel any existing controller for this gameId
   activeControllers.get(task.gameId)?.cancel();
+
+  // Inside native Android/iOS APK (Capacitor), bypass WebView fetch/RAM limits via Filesystem.downloadFile
+  if (Capacitor.isNativePlatform() && task.webseed_url) {
+    await startCapacitorNativeDownload(task, onUpdate);
+    return;
+  }
 
   let cancelled = false;
   let switchedToFallback = false;
@@ -359,7 +551,6 @@ export async function startHybridDownload(
   await saveDownloadTask(initialTask);
   onUpdate(initialTask);
 
-  // If no torrent_url, or if there are already partial HTTP chunks in IndexedDB, go straight to fetch+ReadableStream
   const existingChunks = await getDownloadChunks(task.gameId);
   if (!task.torrent_url || existingChunks.totalBytes > 0) {
     await startFetchStreamDownload(
@@ -430,7 +621,6 @@ export async function startHybridDownload(
       void triggerFallback();
     });
 
-    // If WebTorrent does not transfer data within 8.5s (e.g. WebRTC/tracker blocked), auto-fallback to fetch+ReadableStream
     fallbackTimer = window.setTimeout(() => {
       if (!activeTorrent || activeTorrent.downloaded === 0) {
         void triggerFallback();
@@ -466,7 +656,8 @@ export async function startHybridDownload(
         if (cancelled || switchedToFallback) return;
 
         const downloaded = torrent.downloaded || 0;
-        const total = torrent.length || initialTask.totalBytes || parseSizeToBytes(initialTask.tamanho);
+        const total =
+          torrent.length || initialTask.totalBytes || parseSizeToBytes(initialTask.tamanho);
         const progress = Math.min(99.9, (torrent.progress || 0) * 100);
 
         if (downloaded > 0 && fallbackTimer !== null) {

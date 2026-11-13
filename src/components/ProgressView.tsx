@@ -1,12 +1,14 @@
 import {
   CheckCircle2,
   Download,
+  ExternalLink,
   Play,
   RotateCcw,
   Trash2,
   Users,
   X,
 } from 'lucide-react';
+import { openExternalNativeDownload } from '../services/downloadEngine';
 import type { DownloadTask } from '../types/game';
 import { formatBytes, formatSpeedMBs } from '../utils/formatters';
 import { GameCover } from './GameCover';
@@ -49,6 +51,7 @@ export function ProgressView({
         const isPaused = task.status === 'paused';
         const isCompleted = task.status === 'completed';
         const isError = task.status === 'error';
+        const externalUrl = task.webseed_url || task.torrent_url;
 
         return (
           <article
@@ -91,11 +94,16 @@ export function ProgressView({
                 <p className="text-xs font-medium mt-0.5 text-[#8B5CF6]">
                   {task.status === 'starting' && 'Iniciando conexão P2P...'}
                   {task.status === 'downloading' &&
-                    (task.mode === 'webtorrent'
+                    (task.mode === 'capacitor-native'
+                      ? 'Download Nativo (Documentos)'
+                      : task.mode === 'webtorrent'
                       ? 'WebTorrent P2P + WebSeed'
                       : 'WebSeed Direto (HTTP Stream)')}
                   {isPaused && 'Interrompido — pronto para retomar (IndexedDB)'}
-                  {isCompleted && 'Concluído'}
+                  {isCompleted &&
+                    (task.savedPath
+                      ? `Salvo em ${task.savedPath}`
+                      : 'Concluído')}
                   {isError && 'Falha no download'}
                 </p>
               </div>
@@ -126,10 +134,12 @@ export function ProgressView({
                   {isActive && (
                     <>
                       <span>{formatSpeedMBs(task.speedBytesPerSec)}</span>
-                      <span className="inline-flex items-center gap-1 text-[#A5B4FC]">
-                        <Users className="w-3.5 h-3.5" />
-                        {task.peers} peers
-                      </span>
+                      {task.mode !== 'capacitor-native' && (
+                        <span className="inline-flex items-center gap-1 text-[#A5B4FC]">
+                          <Users className="w-3.5 h-3.5" />
+                          {task.peers} peers
+                        </span>
+                      )}
                     </>
                   )}
                   <span className="font-bold text-white">{task.progress.toFixed(1)}%</span>
@@ -144,7 +154,7 @@ export function ProgressView({
             )}
 
             {/* Action buttons */}
-            <div className="flex items-center gap-2 pt-0.5">
+            <div className="flex flex-col gap-2 pt-0.5">
               {isActive && (
                 <button
                   type="button"
@@ -156,7 +166,7 @@ export function ProgressView({
               )}
 
               {isPaused && (
-                <>
+                <div className="flex items-center gap-2">
                   <button
                     type="button"
                     onClick={() => onResume(task)}
@@ -172,34 +182,50 @@ export function ProgressView({
                   >
                     Cancelar
                   </button>
-                </>
+                </div>
               )}
 
               {isError && (
                 <>
-                  <button
-                    type="button"
-                    onClick={() => onRetry(task)}
-                    className="flex-1 min-h-[44px] rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
-                  >
-                    <RotateCcw className="w-4 h-4" />
-                    <span>Tentar novamente</span>
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onCancel(task.gameId)}
-                    className="min-h-[44px] px-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold"
-                  >
-                    Cancelar
-                  </button>
+                  {externalUrl && (
+                    <button
+                      type="button"
+                      onClick={() => openExternalNativeDownload(externalUrl)}
+                      className="w-full min-h-[44px] px-4 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] text-white text-xs font-semibold flex items-center justify-center gap-2 transition-colors"
+                    >
+                      <ExternalLink className="w-4 h-4 shrink-0" />
+                      <span>Baixar pelo Navegador / Gerenciador Nativo</span>
+                    </button>
+                  )}
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => onRetry(task)}
+                      className="flex-1 min-h-[44px] rounded-xl bg-[#2A2738] hover:bg-[#353146] text-white text-xs font-semibold flex items-center justify-center gap-1.5 transition-colors"
+                    >
+                      <RotateCcw className="w-4 h-4" />
+                      <span>Tentar novamente</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => onCancel(task.gameId)}
+                      className="min-h-[44px] px-4 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold"
+                    >
+                      Cancelar
+                    </button>
+                  </div>
                 </>
               )}
 
               {isCompleted && (
                 <div className="w-full flex items-center gap-2">
                   <div className="flex items-center gap-1.5 text-xs text-emerald-400 font-medium">
-                    <CheckCircle2 className="w-4 h-4" />
-                    <span>APK pronto</span>
+                    <CheckCircle2 className="w-4 h-4 shrink-0" />
+                    <span>
+                      {task.savedPath
+                        ? `APK salvo (${task.fileName})`
+                        : 'APK pronto'}
+                    </span>
                   </div>
                   <div className="flex-1" />
                   {task.blobUrl ? (
@@ -210,6 +236,15 @@ export function ProgressView({
                     >
                       <Download className="w-4 h-4" />
                       <span>Salvar APK</span>
+                    </button>
+                  ) : externalUrl && task.mode === 'capacitor-native' ? (
+                    <button
+                      type="button"
+                      onClick={() => openExternalNativeDownload(externalUrl)}
+                      className="min-h-[44px] px-4 rounded-xl bg-[#2A2738] hover:bg-[#353146] text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
+                    >
+                      <ExternalLink className="w-4 h-4" />
+                      <span>Baixar novamente</span>
                     </button>
                   ) : (
                     <button

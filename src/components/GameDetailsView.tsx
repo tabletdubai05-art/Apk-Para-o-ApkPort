@@ -4,12 +4,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  ExternalLink,
   Heart,
   Play,
   RotateCcw,
   Users,
   X,
 } from 'lucide-react';
+import { openExternalNativeDownload } from '../services/downloadEngine';
 import type { DownloadTask, Jogo } from '../types/game';
 import {
   formatBytes,
@@ -55,6 +57,7 @@ export function GameDetailsView({
     downloadTask?.status === 'starting' || downloadTask?.status === 'downloading';
   const isPaused = downloadTask?.status === 'paused';
   const isCompleted = downloadTask?.status === 'completed';
+  const externalUrl = jogo.webseed_url || jogo.torrent_url;
 
   return (
     <div className="min-h-screen bg-[#0F0E13] text-white pb-28">
@@ -117,7 +120,7 @@ export function GameDetailsView({
             </div>
 
             {/* Download Action / Live Progress */}
-            <div className="pt-1">
+            <div className="pt-1 space-y-2.5">
               {!downloadTask || downloadTask.status === 'cancelled' ? (
                 <button
                   type="button"
@@ -133,11 +136,16 @@ export function GameDetailsView({
                     <span className="font-semibold text-white">
                       {downloadTask.status === 'starting' && 'Conectando ao enxame P2P...'}
                       {downloadTask.status === 'downloading' &&
-                        (downloadTask.mode === 'webtorrent'
+                        (downloadTask.mode === 'capacitor-native'
+                          ? 'Baixando nativamente para Documentos'
+                          : downloadTask.mode === 'webtorrent'
                           ? 'Baixando via P2P + WebSeed'
                           : 'Baixando via WebSeed (HTTP Direto)')}
                       {isPaused && 'Download pausado (salvo no IndexedDB)'}
-                      {isCompleted && 'Download concluído'}
+                      {isCompleted &&
+                        (downloadTask.savedPath
+                          ? `Salvo em ${downloadTask.savedPath}`
+                          : 'Download concluído')}
                       {downloadTask.status === 'error' && 'Erro no download'}
                     </span>
                     <span className="font-mono-nums font-bold text-[#8B5CF6]">
@@ -165,10 +173,12 @@ export function GameDetailsView({
                       {isDownloading && (
                         <>
                           <span>{formatSpeedMBs(downloadTask.speedBytesPerSec)}</span>
-                          <span className="inline-flex items-center gap-1 text-[#A5B4FC]">
-                            <Users className="w-3.5 h-3.5" />
-                            {downloadTask.peers} peers
-                          </span>
+                          {downloadTask.mode !== 'capacitor-native' && (
+                            <span className="inline-flex items-center gap-1 text-[#A5B4FC]">
+                              <Users className="w-3.5 h-3.5" />
+                              {downloadTask.peers} peers
+                            </span>
+                          )}
                         </>
                       )}
                     </div>
@@ -191,14 +201,26 @@ export function GameDetailsView({
                     )}
 
                     {downloadTask.status === 'error' && (
-                      <button
-                        type="button"
-                        onClick={() => onStartDownload(jogo)}
-                        className="flex-1 min-h-[44px] px-4 rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
-                      >
-                        <RotateCcw className="w-4 h-4" />
-                        <span>Tentar novamente</span>
-                      </button>
+                      <>
+                        {externalUrl && (
+                          <button
+                            type="button"
+                            onClick={() => openExternalNativeDownload(externalUrl)}
+                            className="w-full min-h-[44px] px-4 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+                          >
+                            <ExternalLink className="w-4 h-4 shrink-0" />
+                            <span>Baixar pelo Navegador / Gerenciador Nativo</span>
+                          </button>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => onStartDownload(jogo)}
+                          className="flex-1 min-h-[44px] px-4 rounded-xl bg-[#2A2738] hover:bg-[#353146] text-white text-sm font-semibold flex items-center justify-center gap-2 transition-colors"
+                        >
+                          <RotateCcw className="w-4 h-4" />
+                          <span>Tentar novamente</span>
+                        </button>
+                      </>
                     )}
 
                     {isCompleted && downloadTask.blobUrl && (

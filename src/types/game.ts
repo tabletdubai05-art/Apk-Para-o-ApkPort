@@ -28,7 +28,7 @@ export type DownloadStatus =
   | 'error'
   | 'cancelled';
 
-export type DownloadMode = 'webtorrent' | 'http-fallback';
+export type DownloadMode = 'webtorrent' | 'http-fallback' | 'capacitor-native';
 
 export interface DownloadTask {
   gameId: string;
@@ -46,6 +46,7 @@ export interface DownloadTask {
   speedBytesPerSec: number;
   peers: number;
   fileName: string;
+  savedPath?: string;
   errorMessage?: string;
   blobUrl?: string;
   updatedAt: number;
