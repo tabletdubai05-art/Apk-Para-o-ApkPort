@@ -24,9 +24,10 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Instalar dependencias e gerar build web
+      - name: Limpar pacotes conflitantes e gerar build web
         run: |
-          npm uninstall @capacitor/filesystem || true
+          rm -rf node_modules package-lock.json
+          sed -i '/@capacitor\/filesystem/d' package.json
           npm install --legacy-peer-deps
           npm run build
 
@@ -36,6 +37,15 @@ jobs:
           rm -f capacitor.config.ts capacitor.config.js
           echo '{"appId":"com.droidport.store","appName":"DroidPort Store","webDir":"dist"}' > capacitor.config.json
           npx cap add android
+
+      - name: Substituir icone do Android pelo icon.png
+        run: |
+          mkdir -p assets
+          if [ -f "public/icon.png" ]; then cp public/icon.png assets/icon.png; fi
+          if [ -f "icon.png" ]; then cp icon.png assets/icon.png; fi
+          if [ -f "assets/icon.png" ]; then
+            npx @capacitor/assets generate --android
+          fi
           npx cap sync
 
       - name: Compilar e Assinar APK com Chave Fixa
@@ -53,3 +63,4 @@ jobs:
         with:
           name: DroidPort-Store-APK
           path: DroidPort-Store.apk
+          
