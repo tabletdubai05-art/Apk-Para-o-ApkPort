@@ -34,18 +34,21 @@ jobs:
           npm install --legacy-peer-deps
           npm run build
 
-      - name: Instalar e configurar Capacitor Android e Browser
+      - name: Instalar e configurar Capacitor Android, App e Browser
         run: |
-          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/browser@6 --legacy-peer-deps
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/browser@6 @capacitor/app@6 --legacy-peer-deps
           rm -f capacitor.config.ts capacitor.config.js
           echo '{"appId":"com.droidport.store","appName":"DroidPort Store","webDir":"dist"}' > capacitor.config.json
           npx cap add android
 
-      - name: Permitir visibilidade do LibreTorrent no AndroidManifest
+      - name: Configurar LibreTorrent e Deep Link Login Google no AndroidManifest
         run: |
           MANIFEST="android/app/src/main/AndroidManifest.xml"
           if ! grep -q "org.proninyaroslav.libretorrent" "$MANIFEST"; then
             sed -i 's/<\/manifest>/<queries><package android:name="org.proninyaroslav.libretorrent" \/><\/queries><\/manifest>/' "$MANIFEST"
+          fi
+          if ! grep -q "droidport" "$MANIFEST"; then
+            sed -i 's/<\/activity>/<intent-filter><action android:name="android.intent.action.VIEW" \/><category android:name="android.intent.category.DEFAULT" \/><category android:name="android.intent.category.BROWSABLE" \/><data android:scheme="droidport" android:host="login-callback" \/><\/intent-filter><\/activity>/' "$MANIFEST"
           fi
 
       - name: Substituir icone do Android pelo icon.png
@@ -58,18 +61,25 @@ jobs:
           fi
           npx cap sync
 
-      - name: Aplicar Keystore Fixa
-        run: |
-          mkdir -p ~/.android
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
-
       - name: Atualizar versionCode e Compilar APK
         run: |
           sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/g" android/app/build.gradle
+          sed -i "s/versionName \"1.0\"/versionName \"1.0.${{ github.run_number }}\"/g" android/app/build.gradle
           cd android
           chmod +x gradlew
-          ./gradlew assembleDebug
-          cp app/build/outputs/apk/debug/app-debug.apk ../DroidPort-Store.apk
+          ./gradlew assembleRelease
+
+      - name: Assinar APK com Chave Fixa (KEYSTORE_BASE64)
+        run: |
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > fixed.keystore
+          APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
+          $APKSIGNER sign \
+            --ks fixed.keystore \
+            --ks-key-alias androiddebugkey \
+            --ks-pass pass:android \
+            --key-pass pass:android \
+            --out DroidPort-Store.apk \
+            android/app/build/outputs/apk/release/app-release-unsigned.apk
 
       - name: Disponibilizar DroidPort-Store.apk nos Artifacts
         uses: actions/upload-artifact@v4
