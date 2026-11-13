@@ -60,7 +60,7 @@ const SUPABASE_ANON_KEY =
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-export const APP_VERSION = 'v1.0.1';
+export const APP_VERSION = 'v1.0.2';
 const GITHUB_RELEASES_URL =
   'https://api.github.com/repos/SEU_USUARIO/SEU_REPOSITORIO/releases/latest';
 

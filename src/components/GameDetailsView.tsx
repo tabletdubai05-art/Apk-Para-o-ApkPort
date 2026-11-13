@@ -254,8 +254,12 @@ export function GameDetailsView({
                                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                                 )}
                                 <span className="truncate">
-                                  {isCompleted && task.savedPath
+                                  {task.mode === 'android-downloader'
+                                    ? 'Baixando via Sistema Android (veja a barra de notificações)'
+                                    : isCompleted && task.savedPath
                                     ? `Salvo em: ${task.savedPath}`
+                                    : isCompleted
+                                    ? 'Aberto no navegador'
                                     : isError
                                     ? task.errorMessage || 'Erro no download'
                                     : `${formatBytes(task.downloadedBytes)} / ${

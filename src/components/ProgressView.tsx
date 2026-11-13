@@ -100,19 +100,25 @@ export function ProgressView({
                 </p>
 
                 <p className="text-xs font-medium mt-0.5 text-[#8B5CF6] break-all">
-                  {task.status === 'starting' && 'Iniciando download...'}
-                  {task.status === 'downloading' &&
-                    (task.mode === 'capacitor-native'
+                  {task.mode === 'android-downloader'
+                    ? 'Baixando via Sistema Android (veja a barra de notificações)'
+                    : task.status === 'starting'
+                    ? 'Iniciando download...'
+                    : task.status === 'downloading'
+                    ? task.mode === 'capacitor-native'
                       ? `Download Nativo (${task.fileName})`
                       : task.mode === 'webtorrent'
                       ? 'WebTorrent P2P + WebSeed'
-                      : 'WebSeed Direto (HTTP Stream)')}
-                  {isPaused && 'Interrompido — pronto para retomar (IndexedDB)'}
-                  {isCompleted &&
-                    (task.savedPath
+                      : 'WebSeed Direto (HTTP Stream)'
+                    : isPaused
+                    ? 'Interrompido — pronto para retomar (IndexedDB)'
+                    : isCompleted
+                    ? task.savedPath
                       ? `Salvo em: ${task.savedPath}`
-                      : 'Concluído')}
-                  {isError && 'Falha no download'}
+                      : 'Aberto no navegador'
+                    : isError
+                    ? 'Falha no download'
+                    : ''}
                 </p>
               </div>
             </div>

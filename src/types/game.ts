@@ -36,7 +36,11 @@ export type DownloadStatus =
   | 'error'
   | 'cancelled';
 
-export type DownloadMode = 'webtorrent' | 'http-fallback' | 'capacitor-native';
+export type DownloadMode =
+  | 'webtorrent'
+  | 'http-fallback'
+  | 'capacitor-native'
+  | 'android-downloader';
 
 export interface DownloadTask {
   taskId: string;

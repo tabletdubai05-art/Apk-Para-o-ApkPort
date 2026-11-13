@@ -715,249 +715,65 @@ export async function startHybridDownload(
   task: DownloadTask,
   onUpdate: TaskUpdateCallback
 ): Promise<void> {
+  activeControllers.get(task.gameId)?.cancel();
   activeControllers.get(task.taskId)?.cancel();
 
-  if (Capacitor.isNativePlatform() && task.webseed_url) {
-    await startCapacitorNativeDownload(task, onUpdate);
+  const url = task.webseed_url || task.torrent_url;
+  if (!url) {
+    const errTask: DownloadTask = {
+      ...task,
+      status: 'error',
+      speedBytesPerSec: 0,
+      errorMessage: 'Nenhum link de download disponível para este arquivo.',
+      updatedAt: Date.now(),
+    };
+    await saveDownloadTask(errTask);
+    onUpdate(errTask);
     return;
   }
 
-  let cancelled = false;
-  let switchedToFallback = false;
-  let client: WebTorrentClient | null = null;
-  let activeTorrent: WebTorrentTorrent | null = null;
-  let pollInterval: number | null = null;
-  let fallbackTimer: number | null = null;
+  const nomeLimpoDoPort = sanitizeFolderName(task.titulo);
+  const nomeRealDoArquivo = extractFileNameFromUrl(url, nomeLimpoDoPort);
+  const androidDownloader = (window as any).AndroidDownloader;
 
-  const cleanupWebTorrent = () => {
-    if (pollInterval !== null) {
-      window.clearInterval(pollInterval);
-      pollInterval = null;
-    }
-    if (fallbackTimer !== null) {
-      window.clearTimeout(fallbackTimer);
-      fallbackTimer = null;
-    }
-    try {
-      activeTorrent?.destroy();
-    } catch {
-      // Ignore destroy errors
-    }
-    try {
-      client?.destroy();
-    } catch {
-      // Ignore destroy errors
-    }
-    activeTorrent = null;
-    client = null;
-  };
+  // 1. Native AndroidDownloader bridge inside APK
+  if (androidDownloader && typeof androidDownloader.baixar === 'function') {
+    androidDownloader.baixar(url, nomeLimpoDoPort, nomeRealDoArquivo);
 
-  activeControllers.set(task.taskId, {
-    cancel: () => {
-      cancelled = true;
-      cleanupWebTorrent();
-    },
-  });
+    const nativeTask: DownloadTask = {
+      ...task,
+      status: 'completed',
+      mode: 'android-downloader',
+      fileName: nomeRealDoArquivo,
+      progress: 100,
+      speedBytesPerSec: 0,
+      peers: 0,
+      savedPath: `Downloads/${nomeLimpoDoPort}/${nomeRealDoArquivo}`,
+      errorMessage: undefined,
+      updatedAt: Date.now(),
+    };
+    await saveDownloadTask(nativeTask);
+    onUpdate(nativeTask);
+    return;
+  }
 
-  const initialTask: DownloadTask = {
+  // 2. Fallback when AndroidDownloader is not present (web browser)
+  window.open(url, '_blank');
+
+  const webTask: DownloadTask = {
     ...task,
-    status: 'starting',
+    status: 'completed',
+    mode: 'http-fallback',
+    fileName: nomeRealDoArquivo,
+    progress: 100,
+    speedBytesPerSec: 0,
+    peers: 0,
+    savedPath: undefined,
     errorMessage: undefined,
     updatedAt: Date.now(),
   };
-  await saveDownloadTask(initialTask);
-  onUpdate(initialTask);
-
-  const existingChunks = await getDownloadChunks(task.taskId);
-  if (!task.torrent_url || existingChunks.totalBytes > 0) {
-    await startFetchStreamDownload(
-      {
-        ...initialTask,
-        mode: 'http-fallback',
-      },
-      onUpdate,
-      () => cancelled
-    );
-    return;
-  }
-
-  const WebTorrentCtor = await ensureWebTorrentLoaded();
-  if (!WebTorrentCtor || cancelled) {
-    if (!cancelled && task.webseed_url) {
-      await startFetchStreamDownload(
-        {
-          ...initialTask,
-          mode: 'http-fallback',
-        },
-        onUpdate,
-        () => cancelled
-      );
-    } else if (!cancelled) {
-      const errTask: DownloadTask = {
-        ...initialTask,
-        status: 'error',
-        errorMessage: 'Motor WebTorrent indisponível e sem URL direta configurada.',
-        updatedAt: Date.now(),
-      };
-      await saveDownloadTask(errTask);
-      onUpdate(errTask);
-    }
-    return;
-  }
-
-  const triggerFallback = async () => {
-    if (cancelled || switchedToFallback) return;
-    switchedToFallback = true;
-    cleanupWebTorrent();
-
-    if (task.webseed_url) {
-      await startFetchStreamDownload(
-        {
-          ...initialTask,
-          mode: 'http-fallback',
-        },
-        onUpdate,
-        () => cancelled
-      );
-    } else {
-      const errTask: DownloadTask = {
-        ...initialTask,
-        status: 'error',
-        errorMessage: 'Trackers P2P bloqueados e nenhuma URL direta disponível.',
-        updatedAt: Date.now(),
-      };
-      await saveDownloadTask(errTask);
-      onUpdate(errTask);
-    }
-  };
-
-  try {
-    client = new WebTorrentCtor();
-
-    client.on('error', () => {
-      void triggerFallback();
-    });
-
-    fallbackTimer = window.setTimeout(() => {
-      if (!activeTorrent || activeTorrent.downloaded === 0) {
-        void triggerFallback();
-      }
-    }, 8500);
-
-    const torrentOpts: Record<string, unknown> = {
-      announce: [
-        'wss://tracker.openwebtorrent.com',
-        'wss://tracker.btorrent.xyz',
-        'wss://tracker.fastcast.nz',
-      ],
-    };
-    if (task.webseed_url) {
-      torrentOpts.urlList = [task.webseed_url];
-    }
-
-    activeTorrent = client.add(task.torrent_url, torrentOpts, (torrent) => {
-      if (cancelled || switchedToFallback) {
-        torrent.destroy();
-        return;
-      }
-
-      if (task.webseed_url) {
-        try {
-          torrent.addWebSeed(task.webseed_url);
-        } catch {
-          // Ignore duplicate webseed
-        }
-      }
-
-      pollInterval = window.setInterval(() => {
-        if (cancelled || switchedToFallback) return;
-
-        const downloaded = torrent.downloaded || 0;
-        const total =
-          torrent.length || initialTask.totalBytes || parseSizeToBytes(initialTask.tamanho);
-        const progress = Math.min(99.9, (torrent.progress || 0) * 100);
-
-        if (downloaded > 0 && fallbackTimer !== null) {
-          window.clearTimeout(fallbackTimer);
-          fallbackTimer = null;
-        }
-
-        const updated: DownloadTask = {
-          ...initialTask,
-          status: 'downloading',
-          mode: 'webtorrent',
-          downloadedBytes: downloaded,
-          totalBytes: total,
-          progress,
-          speedBytesPerSec: torrent.downloadSpeed || 0,
-          peers: torrent.numPeers || 0,
-          updatedAt: Date.now(),
-        };
-        onUpdate(updated);
-        void saveDownloadTask(updated);
-      }, 450);
-
-      torrent.on('done', () => {
-        if (cancelled || switchedToFallback) return;
-        if (pollInterval !== null) {
-          window.clearInterval(pollInterval);
-          pollInterval = null;
-        }
-        if (fallbackTimer !== null) {
-          window.clearTimeout(fallbackTimer);
-          fallbackTimer = null;
-        }
-
-        const targetFile =
-          torrent.files.find((f) => f.name.toLowerCase().endsWith('.apk')) ||
-          torrent.files[0];
-
-        const finalize = (blobUrl?: string) => {
-          const completed: DownloadTask = {
-            ...initialTask,
-            status: 'completed',
-            mode: 'webtorrent',
-            downloadedBytes: torrent.length || initialTask.totalBytes,
-            totalBytes: torrent.length || initialTask.totalBytes,
-            progress: 100,
-            speedBytesPerSec: 0,
-            peers: torrent.numPeers || 0,
-            fileName: targetFile?.name || initialTask.fileName,
-            blobUrl,
-            updatedAt: Date.now(),
-          };
-          void saveDownloadTask(completed);
-          onUpdate(completed);
-          if (blobUrl) {
-            triggerBrowserSave(blobUrl, completed.fileName);
-          }
-          activeControllers.delete(task.taskId);
-        };
-
-        if (targetFile) {
-          targetFile.getBlobURL((err, url) => {
-            if (err || !url) {
-              finalize(undefined);
-            } else {
-              finalize(url);
-            }
-          });
-        } else {
-          finalize(undefined);
-        }
-      });
-
-      torrent.on('error', () => {
-        void triggerFallback();
-      });
-    });
-
-    activeTorrent.on('error', () => {
-      void triggerFallback();
-    });
-  } catch {
-    await triggerFallback();
-  }
+  await saveDownloadTask(webTask);
+  onUpdate(webTask);
 }
 
 export async function cancelDownloadTask(
