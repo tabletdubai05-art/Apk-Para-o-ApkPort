@@ -9,13 +9,95 @@ import { extractFileNameFromUrl, sanitizeFolderName } from '../utils/formatters'
 
 type TaskUpdateCallback = (task: DownloadTask) => void;
 
-export async function openSystemDownloadManager(url?: string | null): Promise<void> {
-  if (!url) return;
+const ARCHIVE_METADATA_TIMEOUT_MS = 3000;
+
+function normalizeArchiveOrgUrl(rawUrl: string): string {
+  return rawUrl.replace(/archive\.org\/details\//i, 'archive.org/download/');
+}
+
+function parseArchiveOrgDownloadUrl(
+  rawUrl: string
+): { itemId: string; filePath: string } | null {
+  try {
+    const parsed = new URL(rawUrl);
+    if (!parsed.hostname.toLowerCase().includes('archive.org')) {
+      return null;
+    }
+    const idx = parsed.pathname.indexOf('/download/');
+    if (idx === -1) {
+      return null;
+    }
+    const remainder = parsed.pathname.slice(idx + '/download/'.length);
+    const segments = remainder.split('/').filter(Boolean);
+    if (segments.length < 2) {
+      return null;
+    }
+    const itemId = decodeURIComponent(segments[0]);
+    const filePath = segments.slice(1).join('/');
+    return { itemId, filePath };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveDirectDownloadUrl(rawUrl: string): Promise<string> {
+  const normalizedUrl = normalizeArchiveOrgUrl(rawUrl.trim());
+  const parsed = parseArchiveOrgDownloadUrl(normalizedUrl);
+  if (!parsed) {
+    return normalizedUrl;
+  }
+
+  const controller = new AbortController();
+  const timeoutId = setTimeout(() => controller.abort(), ARCHIVE_METADATA_TIMEOUT_MS);
+
+  try {
+    const metadataUrl = `https://archive.org/metadata/${encodeURIComponent(parsed.itemId)}`;
+    const response = await fetch(metadataUrl, {
+      method: 'GET',
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      return normalizedUrl;
+    }
+
+    const data = (await response.json()) as {
+      d1?: unknown;
+      dir?: unknown;
+    };
+
+    if (
+      typeof data.d1 === 'string' &&
+      data.d1.trim() &&
+      typeof data.dir === 'string' &&
+      data.dir.trim()
+    ) {
+      const server = data.d1.trim();
+      const rawDir = data.dir.trim();
+      const dir = (rawDir.startsWith('/') ? rawDir : `/${rawDir}`).replace(/\/+$/, '');
+      const filePath = parsed.filePath.replace(/^\/+/, '');
+      return `https://${server}${dir}/${filePath}`;
+    }
+
+    return normalizedUrl;
+  } catch {
+    return normalizedUrl;
+  } finally {
+    clearTimeout(timeoutId);
+  }
+}
+
+async function openUrlInSystemBrowser(url: string): Promise<void> {
   try {
     await Browser.open({ url });
   } catch {
     window.open(url, '_system');
   }
+}
+
+export async function openSystemDownloadManager(url?: string | null): Promise<void> {
+  if (!url) return;
+  const directUrl = await resolveDirectDownloadUrl(url);
+  await openUrlInSystemBrowser(directUrl);
 }
 
 export async function startHybridDownload(
@@ -37,13 +119,11 @@ export async function startHybridDownload(
   }
 
   const nomeLimpoDoPort = sanitizeFolderName(task.titulo);
-  const nomeRealDoArquivo = extractFileNameFromUrl(url, nomeLimpoDoPort);
+  const normalizedUrl = normalizeArchiveOrgUrl(url.trim());
+  const nomeRealDoArquivo = extractFileNameFromUrl(normalizedUrl, nomeLimpoDoPort);
 
-  try {
-    await Browser.open({ url });
-  } catch {
-    window.open(url, '_system');
-  }
+  const directUrl = await resolveDirectDownloadUrl(normalizedUrl);
+  await openUrlInSystemBrowser(directUrl);
 
   const dispatchedTask: DownloadTask = {
     ...task,

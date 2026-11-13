@@ -52,7 +52,49 @@ import {
   sanitizeFolderName,
 } from './utils/formatters';
 
-export const VERSAO_APP = '1.0.4';
+export const VERSAO_APP = '1.0.1';
+
+function isValidHttpUrl(value: unknown): value is string {
+  if (typeof value !== 'string') return false;
+  const trimmed = value.trim();
+  if (!trimmed.toLowerCase().startsWith('http')) return false;
+  try {
+    const parsed = new URL(trimmed);
+    return parsed.protocol === 'http:' || parsed.protocol === 'https:';
+  } catch {
+    return false;
+  }
+}
+
+function isRemoteVersionGreater(
+  remoteVersion: string,
+  currentVersion: string
+): boolean {
+  const parseParts = (v: string): number[] | null => {
+    const cleaned = v.trim().replace(/^v/i, '');
+    if (!cleaned) return null;
+    const segments = cleaned.split('.');
+    const nums = segments.map((seg) => {
+      if (!/^\d+$/.test(seg)) return NaN;
+      return Number.parseInt(seg, 10);
+    });
+    if (nums.some((n) => Number.isNaN(n))) return null;
+    return nums;
+  };
+
+  const remoteParts = parseParts(remoteVersion);
+  const currentParts = parseParts(currentVersion);
+  if (!remoteParts || !currentParts) return false;
+
+  const maxLen = Math.max(remoteParts.length, currentParts.length);
+  for (let i = 0; i < maxLen; i++) {
+    const r = remoteParts[i] ?? 0;
+    const c = currentParts[i] ?? 0;
+    if (r > c) return true;
+    if (r < c) return false;
+  }
+  return false;
+}
 
 const SUPABASE_URL = 'https://mfwzkzywxvbbonsshjgh.supabase.co';
 const SUPABASE_ANON_KEY =
@@ -134,10 +176,12 @@ export default function App() {
             : row.versao_atual !== null && row.versao_atual !== undefined
             ? String(row.versao_atual).trim()
             : '';
-        const linkApk =
-          typeof row.link_apk === 'string' ? row.link_apk.trim() : '';
+        if (!isValidHttpUrl(row.link_apk)) {
+          return;
+        }
 
-        if (!versaoAtual || versaoAtual === VERSAO_APP || !active) {
+        const linkApk = row.link_apk.trim();
+        if (!versaoAtual || !isRemoteVersionGreater(versaoAtual, VERSAO_APP) || !active) {
           return;
         }
 
