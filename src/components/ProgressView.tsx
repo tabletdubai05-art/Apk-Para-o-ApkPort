@@ -18,7 +18,6 @@ interface ProgressViewProps {
   onCancel: (taskId: string) => void;
   onResume: (task: DownloadTask) => void;
   onRetry: (task: DownloadTask) => void;
-  onSaveCompleted: (task: DownloadTask) => void;
   onRemoveFinished: (taskId: string) => void;
 }
 
@@ -27,7 +26,6 @@ export function ProgressView({
   onCancel,
   onResume,
   onRetry,
-  onSaveCompleted,
   onRemoveFinished,
 }: ProgressViewProps) {
   if (tasks.length === 0) {
@@ -100,22 +98,14 @@ export function ProgressView({
                 </p>
 
                 <p className="text-xs font-medium mt-0.5 text-[#8B5CF6] break-all">
-                  {task.mode === 'android-downloader'
-                    ? 'Baixando via Sistema Android (veja a barra de notificações)'
+                  {task.mode === 'system-browser' || isCompleted
+                    ? 'Enviado para o Gerenciador de Downloads do Android'
                     : task.status === 'starting'
                     ? 'Iniciando download...'
                     : task.status === 'downloading'
-                    ? task.mode === 'capacitor-native'
-                      ? `Download Nativo (${task.fileName})`
-                      : task.mode === 'webtorrent'
-                      ? 'WebTorrent P2P + WebSeed'
-                      : 'WebSeed Direto (HTTP Stream)'
+                    ? 'Abrindo no navegador do sistema...'
                     : isPaused
-                    ? 'Interrompido — pronto para retomar (IndexedDB)'
-                    : isCompleted
-                    ? task.savedPath
-                      ? `Salvo em: ${task.savedPath}`
-                      : 'Aberto no navegador'
+                    ? 'Interrompido — pronto para tentar novamente'
                     : isError
                     ? 'Falha no download'
                     : ''}
@@ -148,12 +138,10 @@ export function ProgressView({
                   {isActive && (
                     <>
                       <span>{formatSpeedMBs(task.speedBytesPerSec)}</span>
-                      {task.mode !== 'capacitor-native' && (
-                        <span className="inline-flex items-center gap-1 text-[#A5B4FC]">
-                          <Users className="w-3.5 h-3.5" />
-                          {task.peers} peers
-                        </span>
-                      )}
+                      <span className="inline-flex items-center gap-1 text-[#A5B4FC]">
+                        <Users className="w-3.5 h-3.5" />
+                        {task.peers} peers
+                      </span>
                     </>
                   )}
                   <span className="font-bold text-white">{task.progress.toFixed(1)}%</span>
@@ -226,16 +214,6 @@ export function ProgressView({
                     <span>Concluído</span>
                   </div>
                   <div className="flex-1" />
-                  {task.blobUrl && (
-                    <button
-                      type="button"
-                      onClick={() => onSaveCompleted(task)}
-                      className="min-h-[44px] px-3.5 rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-white text-xs font-semibold flex items-center gap-1.5 transition-colors"
-                    >
-                      <Download className="w-4 h-4" />
-                      <span>Salvar arquivo</span>
-                    </button>
-                  )}
                   <button
                     type="button"
                     onClick={() => onRetry(task)}

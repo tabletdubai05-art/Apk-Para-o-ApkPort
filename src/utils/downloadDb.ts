@@ -44,11 +44,7 @@ export async function saveDownloadTask(task: DownloadTask): Promise<void> {
     const db = await openDb();
     const tx = db.transaction(STORE_TASKS, 'readwrite');
     const store = tx.objectStore(STORE_TASKS);
-    const serializable: DownloadTask = {
-      ...task,
-      blobUrl: undefined,
-    };
-    store.put(serializable);
+    store.put(task);
     await new Promise<void>((resolve, reject) => {
       tx.oncomplete = () => resolve();
       tx.onerror = () => reject(tx.error);

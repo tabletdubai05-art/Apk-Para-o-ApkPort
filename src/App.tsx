@@ -27,10 +27,8 @@ import { SettingsView } from './components/SettingsView';
 import { UpdateModal, type AppUpdateInfo } from './components/UpdateModal';
 import {
   cancelDownloadTask,
-  openSystemDownloadManager,
   restartCleanDownload,
   startHybridDownload,
-  triggerSavedBlobDownload,
 } from './services/downloadEngine';
 import type {
   DownloadTask,
@@ -54,15 +52,13 @@ import {
   sanitizeFolderName,
 } from './utils/formatters';
 
+export const VERSAO_APP = '1.0.4';
+
 const SUPABASE_URL = 'https://mfwzkzywxvbbonsshjgh.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1md3prenl3eHZiYm9uc3NoamdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ1MjIyMTgsImV4cCI6MjExMDA5ODIxOH0.GC7FJFhSVjKaKJsackBMjLXIf4eLUnY8H2J3kDBbi6M';
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-export const APP_VERSION = 'v1.0.2';
-const GITHUB_RELEASES_URL =
-  'https://api.github.com/repos/SEU_USUARIO/SEU_REPOSITORIO/releases/latest';
 
 const FAVORITES_STORAGE_KEY = 'droidport_favorites_v1';
 const VIEW_MODE_STORAGE_KEY = 'droidport_view_mode_v1';
@@ -114,43 +110,43 @@ export default function App() {
     null
   );
 
-  // Check GitHub Releases API for app updates on startup
+  // Check Supabase `config` table for app updates on startup
   useEffect(() => {
     let active = true;
 
     const checkUpdates = async () => {
       try {
-        const response = await fetch(GITHUB_RELEASES_URL, {
-          headers: { Accept: 'application/vnd.github+json' },
-        });
-        if (!response.ok) return;
+        const { data, error: configError } = await supabase
+          .from('config')
+          .select('*')
+          .limit(1);
 
-        const data = (await response.json()) as {
-          tag_name?: string;
-          body?: string;
-          assets?: Array<{ name?: string; browser_download_url?: string }>;
+        if (configError || !data || data.length === 0) return;
+
+        const row = data[0] as {
+          versao_atual?: string | number | null;
+          link_apk?: string | null;
         };
 
-        const tagName = data.tag_name?.trim();
-        if (!tagName || tagName === APP_VERSION) {
+        const versaoAtual =
+          typeof row.versao_atual === 'string'
+            ? row.versao_atual.trim()
+            : row.versao_atual !== null && row.versao_atual !== undefined
+            ? String(row.versao_atual).trim()
+            : '';
+        const linkApk =
+          typeof row.link_apk === 'string' ? row.link_apk.trim() : '';
+
+        if (!versaoAtual || versaoAtual === VERSAO_APP || !active) {
           return;
         }
 
-        const apkAsset = data.assets?.find(
-          (asset) =>
-            typeof asset.browser_download_url === 'string' &&
-            asset.name?.toLowerCase().endsWith('.apk')
-        );
-
-        if (!apkAsset?.browser_download_url || !active) return;
-
         setAvailableUpdate({
-          tagName,
-          downloadUrl: apkAsset.browser_download_url,
-          releaseNotes: data.body?.trim() || undefined,
+          versaoAtual,
+          linkApk,
         });
       } catch {
-        // Silently ignore offline / rate-limit errors during update check
+        // Silently ignore offline / query errors during update check
       }
     };
 
@@ -162,9 +158,11 @@ export default function App() {
 
   const handleUpdateNow = useCallback(() => {
     if (!availableUpdate) return;
-    const downloadUrl = availableUpdate.downloadUrl;
+    const linkApk = availableUpdate.linkApk;
     setAvailableUpdate(null);
-    openSystemDownloadManager(downloadUrl);
+    if (linkApk) {
+      window.open(linkApk, '_system');
+    }
   }, [availableUpdate]);
 
   // Fetch games from Supabase table `jogos`
@@ -299,7 +297,7 @@ export default function App() {
         torrent_url: arquivo.torrent_url ?? null,
         webseed_url: arquivo.url || null,
         status: 'starting',
-        mode: arquivo.torrent_url ? 'webtorrent' : 'http-fallback',
+        mode: 'system-browser',
         progress: 0,
         downloadedBytes: 0,
         totalBytes: parseSizeToBytes(tamanho),
@@ -308,7 +306,6 @@ export default function App() {
         fileName,
         savedPath: undefined,
         errorMessage: undefined,
-        blobUrl: undefined,
         updatedAt: Date.now() + index,
       };
     },
@@ -386,18 +383,9 @@ export default function App() {
     void deleteDownloadTask(taskId);
     setDownloads((prev) => {
       const next = { ...prev };
-      if (next[taskId]?.blobUrl) {
-        URL.revokeObjectURL(next[taskId].blobUrl!);
-      }
       delete next[taskId];
       return next;
     });
-  }, []);
-
-  const handleSaveCompleted = useCallback((task: DownloadTask) => {
-    if (task.blobUrl) {
-      triggerSavedBlobDownload(task.blobUrl, task.fileName);
-    }
   }, []);
 
   const handleClearCache = useCallback(async () => {
@@ -405,9 +393,6 @@ export default function App() {
     for (const t of allTasks) {
       if (t.status === 'downloading' || t.status === 'starting') {
         await cancelDownloadTask(t.taskId);
-      }
-      if (t.blobUrl) {
-        URL.revokeObjectURL(t.blobUrl);
       }
     }
     await clearAllDownloadCache();
@@ -520,7 +505,6 @@ export default function App() {
           onCancelDownload={handleCancelDownload}
           onResumeDownload={handleResumeDownload}
           onRetryDownload={handleRetryDownload}
-          onSaveCompleted={handleSaveCompleted}
           onGoToProgress={() => {
             setSelectedGame(null);
             setActiveTab('progresso');
@@ -925,7 +909,6 @@ export default function App() {
               onCancel={handleCancelDownload}
               onResume={handleResumeDownload}
               onRetry={handleRetryDownload}
-              onSaveCompleted={handleSaveCompleted}
               onRemoveFinished={handleRemoveFinished}
             />
           </section>
@@ -938,7 +921,7 @@ export default function App() {
               Configurações
             </h2>
             <SettingsView
-              appVersion={APP_VERSION}
+              appVersion={VERSAO_APP}
               favoritesCount={favorites.length}
               downloadsCount={downloadList.length}
               onClearCache={handleClearCache}

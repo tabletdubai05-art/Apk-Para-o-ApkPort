@@ -11,8 +11,8 @@
     "lint": "tsc --noEmit"
   },
   "dependencies": {
+    "@capacitor/browser": "^8.0.5",
     "@capacitor/core": "^8.6.2",
-    "@capacitor/filesystem": "^8.1.5",
     "@google/genai": "^2.4.0",
     "@supabase/supabase-js": "^2.119.0",
     "@tailwindcss/vite": "^4.3.3",

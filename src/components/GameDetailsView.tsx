@@ -36,7 +36,6 @@ interface GameDetailsViewProps {
   onCancelDownload: (taskId: string) => void;
   onResumeDownload: (task: DownloadTask) => void;
   onRetryDownload: (task: DownloadTask) => void;
-  onSaveCompleted: (task: DownloadTask) => void;
   onGoToProgress: () => void;
 }
 
@@ -51,7 +50,6 @@ export function GameDetailsView({
   onCancelDownload,
   onResumeDownload,
   onRetryDownload,
-  onSaveCompleted,
   onGoToProgress,
 }: GameDetailsViewProps) {
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
@@ -219,15 +217,11 @@ export function GameDetailsView({
                           {isCompleted && (
                             <button
                               type="button"
-                              onClick={() =>
-                                task.blobUrl
-                                  ? onSaveCompleted(task)
-                                  : onRetryDownload(task)
-                              }
+                              onClick={() => onRetryDownload(task)}
                               className="min-h-[44px] px-3.5 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
                             >
                               <RotateCcw className="w-3.5 h-3.5" />
-                              <span>{task.blobUrl ? 'Salvar' : 'Baixar novamente'}</span>
+                              <span>Baixar novamente</span>
                             </button>
                           )}
                         </div>
@@ -254,12 +248,8 @@ export function GameDetailsView({
                                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
                                 )}
                                 <span className="truncate">
-                                  {task.mode === 'android-downloader'
-                                    ? 'Baixando via Sistema Android (veja a barra de notificações)'
-                                    : isCompleted && task.savedPath
-                                    ? `Salvo em: ${task.savedPath}`
-                                    : isCompleted
-                                    ? 'Aberto no navegador'
+                                  {task.mode === 'system-browser' || isCompleted
+                                    ? 'Enviado para o Gerenciador de Downloads do Android'
                                     : isError
                                     ? task.errorMessage || 'Erro no download'
                                     : `${formatBytes(task.downloadedBytes)} / ${

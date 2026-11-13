@@ -39,8 +39,7 @@ export type DownloadStatus =
 export type DownloadMode =
   | 'webtorrent'
   | 'http-fallback'
-  | 'capacitor-native'
-  | 'android-downloader';
+  | 'system-browser';
 
 export interface DownloadTask {
   taskId: string;
@@ -62,6 +61,5 @@ export interface DownloadTask {
   fileName: string;
   savedPath?: string;
   errorMessage?: string;
-  blobUrl?: string;
   updatedAt: number;
 }

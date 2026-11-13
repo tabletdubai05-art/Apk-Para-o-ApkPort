@@ -116,8 +116,8 @@ export function SettingsView({
           </p>
           <div className="pt-1 space-y-1 font-mono-nums">
             <p>Versão: {appVersion}</p>
-            <p>Motor de Download: Híbrido WebTorrent (P2P + WebSeed) &amp; ReadableStream</p>
-            <p>Persistência: localStorage (favoritos) + IndexedDB (retomada de downloads)</p>
+            <p>Motor de Download: Navegador Nativo / Gerenciador do Sistema Android</p>
+            <p>Persistência: localStorage (favoritos) + IndexedDB (histórico de downloads)</p>
           </div>
         </div>
       </section>
