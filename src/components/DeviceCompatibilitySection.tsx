@@ -14,7 +14,9 @@ import {
 } from 'lucide-react';
 import {
   communitySupabase,
+  isNativeApp,
   PENDING_REPORT_GAME_KEY,
+  signInCommunityWithGoogle,
 } from '../lib/communitySupabase';
 import type { RelatoDesempenho } from '../types/game';
 import {
@@ -225,27 +227,6 @@ export function DeviceCompatibilitySection({
     void fetchRelatos();
   }, [fetchRelatos]);
 
-  useEffect(() => {
-    let active = true;
-
-    communitySupabase.auth.getSession().then(({ data }) => {
-      if (!active) return;
-      setCurrentUser(data.session?.user ?? null);
-    });
-
-    const { data: authListener } = communitySupabase.auth.onAuthStateChange(
-      (_event, session) => {
-        if (!active) return;
-        setCurrentUser(session?.user ?? null);
-      }
-    );
-
-    return () => {
-      active = false;
-      authListener.subscription.unsubscribe();
-    };
-  }, []);
-
   const openReportFormWithDetection = useCallback(async () => {
     setSubmitError(null);
     setFps(null);
@@ -267,6 +248,42 @@ export function DeviceCompatibilitySection({
       setDetectingDevice(false);
     }
   }, []);
+
+  useEffect(() => {
+    let active = true;
+
+    communitySupabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setCurrentUser(data.session?.user ?? null);
+    });
+
+    const { data: authListener } = communitySupabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (!active) return;
+        const nextUser = session?.user ?? null;
+        setCurrentUser(nextUser);
+
+        if (nextUser) {
+          setAuthLoading(false);
+          setShowAuthModal(false);
+          try {
+            const pendingGame = localStorage.getItem(PENDING_REPORT_GAME_KEY);
+            if (pendingGame === jogoId) {
+              localStorage.removeItem(PENDING_REPORT_GAME_KEY);
+              void openReportFormWithDetection();
+            }
+          } catch {
+            // Ignore storage errors
+          }
+        }
+      }
+    );
+
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, [jogoId, openReportFormWithDetection]);
 
   // Automatically open report modal after returning from Google OAuth
   useEffect(() => {
@@ -305,16 +322,10 @@ export function DeviceCompatibilitySection({
         // Ignore storage errors
       }
 
-      const redirectUrl = `${window.location.origin}${window.location.pathname}`;
-      const { error } = await communitySupabase.auth.signInWithOAuth({
-        provider: 'google',
-        options: {
-          redirectTo: redirectUrl,
-        },
-      });
+      await signInCommunityWithGoogle();
 
-      if (error) {
-        throw new Error(error.message);
+      if (isNativeApp()) {
+        setAuthLoading(false);
       }
     } catch (err) {
       setAuthLoading(false);

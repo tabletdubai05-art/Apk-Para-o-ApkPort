@@ -51,6 +51,25 @@ jobs:
             sed -i 's/<\/activity>/<intent-filter><action android:name="android.intent.action.VIEW" \/><category android:name="android.intent.category.DEFAULT" \/><category android:name="android.intent.category.BROWSABLE" \/><data android:scheme="droidport" android:host="login-callback" \/><\/intent-filter><\/activity>/' "$MANIFEST"
           fi
 
+      - name: Configurar Deep Link OAuth no AndroidManifest
+        run: |
+          node -e '
+            const fs = require("fs");
+            const manifestPath = "android/app/src/main/AndroidManifest.xml";
+            let xml = fs.readFileSync(manifestPath, "utf8");
+            if (!xml.includes("droidport")) {
+              const intentFilter = `
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="droidport" android:host="login-callback" />
+            </intent-filter>`;
+              xml = xml.replace("</activity>", `${intentFilter}\n        </activity>`);
+              fs.writeFileSync(manifestPath, xml, "utf8");
+            }
+          '
+
       - name: Substituir icone do Android pelo icon.png
         run: |
           mkdir -p assets

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { App as CapacitorApp } from '@capacitor/app';
 import { Browser } from '@capacitor/browser';
 import { createClient } from '@supabase/supabase-js';
 import {
@@ -29,6 +30,9 @@ import { SettingsView } from './components/SettingsView';
 import { UpdateModal, type AppUpdateInfo } from './components/UpdateModal';
 import {
   communitySupabase,
+  handleOAuthCallbackUrl,
+  isNativeApp,
+  NATIVE_OAUTH_REDIRECT_URL,
   PENDING_REPORT_GAME_KEY,
 } from './lib/communitySupabase';
 import {
@@ -59,7 +63,7 @@ import {
   sanitizeFolderName,
 } from './utils/formatters';
 
-export const VERSAO_APP = '1.0.15';
+export const VERSAO_APP = '1.0.16';
 
 function isValidHttpUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
@@ -164,9 +168,68 @@ export default function App() {
     null
   );
 
-  // Track second Supabase auth state to reopen pending game report after OAuth redirect
+  // Track second Supabase auth state & Capacitor deep-link callback (droidport://login-callback)
   useEffect(() => {
     let active = true;
+    let urlListenerHandle: { remove: () => Promise<void> } | null = null;
+
+    const processNativeCallback = async (url: string) => {
+      if (!url.startsWith(NATIVE_OAUTH_REDIRECT_URL)) return;
+      try {
+        await handleOAuthCallbackUrl(url);
+      } catch {
+        // Ignore malformed/expired callback URL
+      } finally {
+        try {
+          await Browser.close();
+        } catch {
+          // Ignore if browser tab is already closed
+        }
+      }
+    };
+
+    if (isNativeApp()) {
+      CapacitorApp.getLaunchUrl()
+        .then((launch) => {
+          if (active && launch?.url) {
+            void processNativeCallback(launch.url);
+          }
+        })
+        .catch(() => {
+          // Ignore
+        });
+
+      CapacitorApp.addListener('appUrlOpen', (event) => {
+        if (!active || !event?.url) return;
+        void processNativeCallback(event.url);
+      })
+        .then((handle) => {
+          if (!active) {
+            void handle.remove();
+          } else {
+            urlListenerHandle = handle;
+          }
+        })
+        .catch(() => {
+          // Ignore
+        });
+    } else if (typeof window !== 'undefined') {
+      const hasOAuthParams =
+        window.location.search.includes('code=') ||
+        window.location.hash.includes('access_token=') ||
+        window.location.hash.includes('error=');
+
+      if (hasOAuthParams) {
+        communitySupabase.auth.getSession().finally(() => {
+          if (!active) return;
+          window.history.replaceState(
+            {},
+            document.title,
+            window.location.origin + window.location.pathname
+          );
+        });
+      }
+    }
 
     communitySupabase.auth.getSession().then(({ data }) => {
       if (!active) return;
@@ -183,6 +246,9 @@ export default function App() {
     return () => {
       active = false;
       authListener.subscription.unsubscribe();
+      if (urlListenerHandle) {
+        void urlListenerHandle.remove();
+      }
     };
   }, []);
 
