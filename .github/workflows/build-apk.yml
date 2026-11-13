@@ -40,6 +40,49 @@ jobs:
           echo '{"appId":"com.droidport.store","appName":"DroidPort Store","webDir":"dist","plugins":{"CapacitorHttp":{"enabled":true}}}' > capacitor.config.json
           npx cap add android
 
+      - name: Injetar DownloadManager Nativo do Android no MainActivity
+        run: |
+          MAIN_ACT=$(find android/app/src/main/java -name "MainActivity.java")
+          cat << 'EOF' > "$MAIN_ACT"
+          package com.droidport.store;
+
+          import android.app.DownloadManager;
+          import android.content.Context;
+          import android.net.Uri;
+          import android.os.Bundle;
+          import android.os.Environment;
+          import android.webkit.JavascriptInterface;
+          import android.widget.Toast;
+          import com.getcapacitor.BridgeActivity;
+
+          public class MainActivity extends BridgeActivity {
+              @Override
+              public void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  this.bridge.getWebView().addJavascriptInterface(new Object() {
+                      @JavascriptInterface
+                      public void baixar(String url, String pasta, String arquivo) {
+                          try {
+                              DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
+                              request.setTitle(arquivo);
+                              request.setDescription("Baixando port para " + pasta);
+                              request.addRequestHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36");
+                              request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
+                              request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, pasta + "/" + arquivo);
+                              DownloadManager manager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
+                              if (manager != null) {
+                                  manager.enqueue(request);
+                                  runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Download iniciado: " + arquivo, Toast.LENGTH_LONG).show());
+                              }
+                          } catch (Exception e) {
+                              runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Erro: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                          }
+                      }
+                  }, "AndroidDownloader");
+              }
+          }
+          EOF
+
       - name: Substituir icone do Android pelo icon.png
         run: |
           mkdir -p assets
