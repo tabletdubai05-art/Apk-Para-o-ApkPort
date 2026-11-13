@@ -51,15 +51,13 @@ jobs:
           fi
           npx cap sync
 
-      - name: Compilar e Assinar APK com Chave Fixa
+      - name: Atualizar versionCode e Compilar APK
         run: |
+          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/g" android/app/build.gradle
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
-          keytool -genkey -v -keystore fixed.keystore -storepass android -alias droidport -keypass android -keyalg RSA -keysize 2048 -validity 10000 -startdate "2025/01/01 00:00:00" -dname "CN=DroidPort, OU=Dev, O=DroidPort, L=SP, S=SP, C=BR"
-          BUILD_TOOLS=$(ls -d $ANDROID_HOME/build-tools/* | tail -n 1)
-          $BUILD_TOOLS/zipalign -p -f 4 app/build/outputs/apk/debug/app-debug.apk aligned.apk
-          $BUILD_TOOLS/apksigner sign --ks fixed.keystore --ks-pass pass:android --key-pass pass:android --out ../DroidPort-Store.apk aligned.apk
+          cp app/build/outputs/apk/debug/app-debug.apk ../DroidPort-Store.apk
 
       - name: Disponibilizar DroidPort-Store.apk nos Artifacts
         uses: actions/upload-artifact@v4
