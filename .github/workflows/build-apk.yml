@@ -27,8 +27,9 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Instalar dependencias e gerar build web
+      - name: Sincronizar versao automatica, instalar dependencias e gerar build web
         run: |
+          sed -i "s/v1\.0\.[0-9]\+/v1.0.${{ github.run_number }}/g" src/*.tsx src/*.ts src/**/*.tsx src/**/*.ts 2>/dev/null || true
           npm install --legacy-peer-deps
           npm run build
 
@@ -78,4 +79,3 @@ jobs:
           generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          

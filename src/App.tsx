@@ -60,39 +60,12 @@ const SUPABASE_ANON_KEY =
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-const APP_VERSION = 'v1.0.0';
+export const APP_VERSION = 'v1.0.0';
 const GITHUB_RELEASES_URL =
   'https://api.github.com/repos/SEU_USUARIO/SEU_REPOSITORIO/releases/latest';
 
-const APP_VERSION_STORAGE_KEY = 'droidport_installed_version_v1';
 const FAVORITES_STORAGE_KEY = 'droidport_favorites_v1';
 const VIEW_MODE_STORAGE_KEY = 'droidport_view_mode_v1';
-
-function isReleaseNewer(remoteTag: string, currentTag: string): boolean {
-  const cleanRemote = remoteTag.trim().replace(/^v/i, '');
-  const cleanCurrent = currentTag.trim().replace(/^v/i, '');
-  if (!cleanRemote || cleanRemote === cleanCurrent) return false;
-
-  const remoteParts = cleanRemote.split('.').map((n) => parseInt(n, 10));
-  const currentParts = cleanCurrent.split('.').map((n) => parseInt(n, 10));
-
-  const validSemver =
-    remoteParts.every((n) => !Number.isNaN(n)) &&
-    currentParts.every((n) => !Number.isNaN(n));
-
-  if (!validSemver) {
-    return remoteTag.trim() !== currentTag.trim();
-  }
-
-  const len = Math.max(remoteParts.length, currentParts.length);
-  for (let i = 0; i < len; i++) {
-    const r = remoteParts[i] ?? 0;
-    const c = currentParts[i] ?? 0;
-    if (r > c) return true;
-    if (r < c) return false;
-  }
-  return false;
-}
 
 const SORT_LABELS: Record<SortOption, string> = {
   recentes: 'Mais Recentes',
@@ -137,13 +110,6 @@ export default function App() {
 
   const [downloads, setDownloads] = useState<Record<string, DownloadTask>>({});
 
-  const [installedVersion, setInstalledVersion] = useState<string>(() => {
-    try {
-      return localStorage.getItem(APP_VERSION_STORAGE_KEY) || APP_VERSION;
-    } catch {
-      return APP_VERSION;
-    }
-  });
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdateInfo | null>(
     null
   );
@@ -166,7 +132,7 @@ export default function App() {
         };
 
         const tagName = data.tag_name?.trim();
-        if (!tagName || !isReleaseNewer(tagName, installedVersion)) {
+        if (!tagName || tagName === APP_VERSION) {
           return;
         }
 
@@ -192,17 +158,11 @@ export default function App() {
     return () => {
       active = false;
     };
-  }, [installedVersion]);
+  }, []);
 
   const handleUpdateNow = useCallback(() => {
     if (!availableUpdate) return;
-    try {
-      localStorage.setItem(APP_VERSION_STORAGE_KEY, availableUpdate.tagName);
-    } catch {
-      // Ignore storage errors
-    }
     const downloadUrl = availableUpdate.downloadUrl;
-    setInstalledVersion(availableUpdate.tagName);
     setAvailableUpdate(null);
     openSystemDownloadManager(downloadUrl);
   }, [availableUpdate]);
@@ -978,7 +938,7 @@ export default function App() {
               Configurações
             </h2>
             <SettingsView
-              appVersion={installedVersion}
+              appVersion={APP_VERSION}
               favoritesCount={favorites.length}
               downloadsCount={downloadList.length}
               onClearCache={handleClearCache}
