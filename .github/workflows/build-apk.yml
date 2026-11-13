@@ -26,6 +26,7 @@ jobs:
 
       - name: Instalar dependencias e gerar build web
         run: |
+          npm uninstall @capacitor/filesystem || true
           npm install --legacy-peer-deps
           npm run build
 
