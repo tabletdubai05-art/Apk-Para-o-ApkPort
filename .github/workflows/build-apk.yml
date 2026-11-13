@@ -58,6 +58,11 @@ jobs:
           fi
           npx cap sync
 
+      - name: Aplicar Keystore Fixa
+        run: |
+          mkdir -p ~/.android
+          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > ~/.android/debug.keystore
+
       - name: Atualizar versionCode e Compilar APK
         run: |
           sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/g" android/app/build.gradle
@@ -80,3 +85,4 @@ jobs:
           files: DroidPort-Store.apk
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          
