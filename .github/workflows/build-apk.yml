@@ -27,61 +27,19 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Sincronizar versao automatica, instalar dependencias e gerar build web
+      - name: Limpar pacotes conflitantes e gerar build web
         run: |
-          sed -i "s/v1\.0\.[0-9]\+/v1.0.${{ github.run_number }}/g" src/*.tsx src/*.ts src/**/*.tsx src/**/*.ts 2>/dev/null || true
+          rm -rf node_modules package-lock.json
+          sed -i '/@capacitor\/filesystem/d' package.json
           npm install --legacy-peer-deps
           npm run build
 
-      - name: Instalar e configurar Capacitor Android e Plugins
+      - name: Instalar e configurar Capacitor Android e Browser
         run: |
           npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/browser@6 --legacy-peer-deps
           rm -f capacitor.config.ts capacitor.config.js
-          echo '{"appId":"com.droidport.store","appName":"DroidPort Store","webDir":"dist","plugins":{"CapacitorHttp":{"enabled":true}}}' > capacitor.config.json
+          echo '{"appId":"com.droidport.store","appName":"DroidPort Store","webDir":"dist"}' > capacitor.config.json
           npx cap add android
-
-      - name: Injetar DownloadManager Nativo do Android no MainActivity
-        run: |
-          MAIN_ACT=$(find android/app/src/main/java -name "MainActivity.java")
-          cat << 'EOF' > "$MAIN_ACT"
-          package com.droidport.store;
-
-          import android.app.DownloadManager;
-          import android.content.Context;
-          import android.net.Uri;
-          import android.os.Bundle;
-          import android.os.Environment;
-          import android.webkit.JavascriptInterface;
-          import android.widget.Toast;
-          import com.getcapacitor.BridgeActivity;
-
-          public class MainActivity extends BridgeActivity {
-              @Override
-              public void onCreate(Bundle savedInstanceState) {
-                  super.onCreate(savedInstanceState);
-                  this.bridge.getWebView().addJavascriptInterface(new Object() {
-                      @JavascriptInterface
-                      public void baixar(String url, String pasta, String arquivo) {
-                          try {
-                              DownloadManager.Request request = new DownloadManager.Request(Uri.parse(url));
-                              request.setTitle(arquivo);
-                              request.setDescription("Baixando port para " + pasta);
-                              request.addRequestHeader("User-Agent", "Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36");
-                              request.setNotificationVisibility(DownloadManager.Request.VISIBILITY_VISIBLE_NOTIFY_COMPLETED);
-                              request.setDestinationInExternalPublicDir(Environment.DIRECTORY_DOWNLOADS, pasta + "/" + arquivo);
-                              DownloadManager manager = (DownloadManager) getSystemService(Context.DOWNLOAD_SERVICE);
-                              if (manager != null) {
-                                  manager.enqueue(request);
-                                  runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Download iniciado: " + arquivo, Toast.LENGTH_LONG).show());
-                              }
-                          } catch (Exception e) {
-                              runOnUiThread(() -> Toast.makeText(getApplicationContext(), "Erro: " + e.getMessage(), Toast.LENGTH_LONG).show());
-                          }
-                      }
-                  }, "AndroidDownloader");
-              }
-          }
-          EOF
 
       - name: Substituir icone do Android pelo icon.png
         run: |
@@ -92,13 +50,6 @@ jobs:
             npx @capacitor/assets generate --android
           fi
           npx cap sync
-
-      - name: Configurar permissoes de rede e armazenamento no Android
-        run: |
-          mkdir -p android/app/src/main/res/xml
-          echo '<?xml version="1.0" encoding="utf-8"?><network-security-config><base-config cleartextTrafficPermitted="true"><trust-anchors><certificates src="system" /><certificates src="user" /></trust-anchors></base-config></network-security-config>' > android/app/src/main/res/xml/network_security_config.xml
-          sed -i 's/<application/<application android:networkSecurityConfig="@xml\/network_security_config" android:usesCleartextTraffic="true" android:requestLegacyExternalStorage="true"/g' android/app/src/main/AndroidManifest.xml
-          sed -i 's/<uses-permission android:name="android.permission.INTERNET" \/>/<uses-permission android:name="android.permission.INTERNET" \/><uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" \/><uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" \/><uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" \/><uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" \/>/g' android/app/src/main/AndroidManifest.xml
 
       - name: Compilar e Assinar APK com Chave Fixa
         run: |
@@ -119,9 +70,8 @@ jobs:
       - name: Publicar Release Automatica no GitHub
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v1.0.${{ github.run_number }}
-          name: Atualizacao v1.0.${{ github.run_number }}
+          tag_name: v${{ github.run_number }}
+          name: Atualizacao Build ${{ github.run_number }}
           files: DroidPort-Store.apk
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
