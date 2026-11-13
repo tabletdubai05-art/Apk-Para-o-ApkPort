@@ -7,56 +7,53 @@ import {
   ChevronRight,
   Copy,
   Download,
-  ExternalLink,
   FileArchive,
   Heart,
   Info,
-  Play,
   PlayCircle,
   RotateCcw,
   X,
   Zap,
 } from 'lucide-react';
-import { openSystemDownloadManager } from '../services/downloadEngine';
 import type { DownloadTask, Jogo, JogoArquivo } from '../types/game';
 import {
   buildDownloadTaskId,
-  formatBytes,
+  buildP2PDownloadTaskId,
   formatCategoriesDot,
-  formatSpeedMBs,
   parsePhotos,
   parseTutorials,
   parseVideoSource,
   resolveGameFiles,
 } from '../utils/formatters';
+import { DeviceCompatibilitySection } from './DeviceCompatibilitySection';
 import { GameCover } from './GameCover';
 
 interface GameDetailsViewProps {
   jogo: Jogo;
   isFavorite: boolean;
   downloads: Record<string, DownloadTask>;
+  autoOpenReportModal?: boolean;
+  onConsumeAutoOpenReport?: () => void;
   onBack: () => void;
   onToggleFavorite: (id: string) => void;
   onStartFileDownload: (jogo: Jogo, arquivo: JogoArquivo, index: number) => void;
+  onStartP2PDownload: (jogo: Jogo, arquivo: JogoArquivo, index: number) => void;
   onDownloadAll: (jogo: Jogo, arquivos: JogoArquivo[]) => void;
-  onCancelDownload: (taskId: string) => void;
-  onResumeDownload: (task: DownloadTask) => void;
   onRetryDownload: (task: DownloadTask) => void;
-  onGoToProgress: () => void;
 }
 
 export function GameDetailsView({
   jogo,
   isFavorite,
   downloads,
+  autoOpenReportModal = false,
+  onConsumeAutoOpenReport,
   onBack,
   onToggleFavorite,
   onStartFileDownload,
+  onStartP2PDownload,
   onDownloadAll,
-  onCancelDownload,
-  onResumeDownload,
   onRetryDownload,
-  onGoToProgress,
 }: GameDetailsViewProps) {
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
@@ -90,27 +87,6 @@ export function GameDetailsView({
         document.body.removeChild(textarea);
       }
     }
-  };
-
-  const openP2PLink = (targetUrl: string) => {
-    const trimmed = targetUrl.trim();
-    if (!trimmed) return;
-
-    if (/^https:\/\//i.test(trimmed)) {
-      const urlWithoutHttps = trimmed.replace(/^https:\/\//i, '');
-      const intentUrl = `intent://${urlWithoutHttps}#Intent;scheme=https;type=application/x-bittorrent;package=org.proninyaroslav.libretorrent;end`;
-      window.location.href = intentUrl;
-      return;
-    }
-
-    if (/^http:\/\//i.test(trimmed)) {
-      const urlWithoutHttp = trimmed.replace(/^http:\/\//i, '');
-      const intentUrl = `intent://${urlWithoutHttp}#Intent;scheme=http;type=application/x-bittorrent;package=org.proninyaroslav.libretorrent;end`;
-      window.location.href = intentUrl;
-      return;
-    }
-
-    window.location.href = trimmed;
   };
 
   return (
@@ -206,12 +182,21 @@ export function GameDetailsView({
                 <div className="space-y-2.5">
                   {files.map((arquivo, index) => {
                     const taskId = buildDownloadTaskId(gameId, arquivo, index);
-                    const task = downloads[taskId];
-                    const isDownloading =
-                      task?.status === 'starting' || task?.status === 'downloading';
-                    const isPaused = task?.status === 'paused';
-                    const isCompleted = task?.status === 'completed';
-                    const isError = task?.status === 'error';
+                    const p2pTaskId = buildP2PDownloadTaskId(gameId, arquivo, index);
+                    const directTask = downloads[taskId];
+                    const p2pTask = downloads[p2pTaskId];
+                    const isDirectRedirected = Boolean(
+                      directTask &&
+                        directTask.status !== 'cancelled' &&
+                        directTask.status !== 'error'
+                    );
+                    const isP2PRedirected = Boolean(
+                      p2pTask &&
+                        p2pTask.status !== 'cancelled' &&
+                        p2pTask.status !== 'error'
+                    );
+                    const isAnyRedirected = isDirectRedirected || isP2PRedirected;
+                    const isDirectError = directTask?.status === 'error';
                     const directUrl = arquivo.url?.trim() || '';
                     const fileTorrentUrl = arquivo.torrent_url?.trim() || '';
 
@@ -236,46 +221,27 @@ export function GameDetailsView({
 
                         {/* Side-by-side Download Direto + Baixar P2P + Copiar Link P2P */}
                         <div className="flex flex-wrap items-center gap-2">
-                          {directUrl && (!task || task.status === 'cancelled') && (
+                          {directUrl && (
                             <button
                               type="button"
-                              onClick={() => onStartFileDownload(jogo, arquivo, index)}
+                              onClick={() =>
+                                isDirectRedirected && directTask
+                                  ? onRetryDownload(directTask)
+                                  : onStartFileDownload(jogo, arquivo, index)
+                              }
                               className="flex-1 min-w-[130px] min-h-[44px] px-3.5 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
                             >
-                              <Download className="w-4 h-4 shrink-0" />
-                              <span>Download Direto</span>
-                            </button>
-                          )}
-
-                          {directUrl && isDownloading && (
-                            <button
-                              type="button"
-                              onClick={() => onCancelDownload(taskId)}
-                              className="flex-1 min-w-[130px] min-h-[44px] px-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold inline-flex items-center justify-center"
-                            >
-                              Cancelar
-                            </button>
-                          )}
-
-                          {directUrl && isPaused && (
-                            <button
-                              type="button"
-                              onClick={() => onResumeDownload(task)}
-                              className="flex-1 min-w-[130px] min-h-[44px] px-3.5 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5"
-                            >
-                              <Play className="w-3.5 h-3.5 shrink-0" />
-                              <span>Retomar</span>
-                            </button>
-                          )}
-
-                          {directUrl && (isError || isCompleted) && (
-                            <button
-                              type="button"
-                              onClick={() => onRetryDownload(task)}
-                              className="flex-1 min-w-[130px] min-h-[44px] px-3.5 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                              <span>Download Direto</span>
+                              {isDirectRedirected ? (
+                                <>
+                                  <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                                  <span>Baixar novamente</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Download className="w-4 h-4 shrink-0" />
+                                  <span>Download Direto</span>
+                                </>
+                              )}
                             </button>
                           )}
 
@@ -283,11 +249,24 @@ export function GameDetailsView({
                             <>
                               <button
                                 type="button"
-                                onClick={() => openP2PLink(fileTorrentUrl)}
+                                onClick={() =>
+                                  isP2PRedirected && p2pTask
+                                    ? onRetryDownload(p2pTask)
+                                    : onStartP2PDownload(jogo, arquivo, index)
+                                }
                                 className="flex-1 min-w-[125px] min-h-[44px] px-3.5 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 shadow-md shadow-[#6366F1]/25 active:scale-[0.98] transition-all"
                               >
-                                <Zap className="w-4 h-4 shrink-0" />
-                                <span>Baixar P2P</span>
+                                {isP2PRedirected ? (
+                                  <>
+                                    <RotateCcw className="w-4 h-4 shrink-0" />
+                                    <span>Baixar novamente</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Zap className="w-4 h-4 shrink-0" />
+                                    <span>Baixar P2P</span>
+                                  </>
+                                )}
                               </button>
 
                               <button
@@ -312,66 +291,19 @@ export function GameDetailsView({
                           )}
                         </div>
 
-                        {task && task.status !== 'cancelled' && (
-                          <div className="space-y-1.5 pt-1 border-t border-[#2A2738]/70">
-                            <div className="w-full h-1.5 rounded-full bg-[#1B1924] overflow-hidden">
-                              <div
-                                className={`h-full rounded-full transition-all duration-200 ${
-                                  isCompleted
-                                    ? 'bg-emerald-500'
-                                    : isError
-                                    ? 'bg-rose-500'
-                                    : 'bg-gradient-to-r from-[#6366F1] to-[#8B5CF6]'
-                                }`}
-                                style={{
-                                  width: `${Math.min(100, Math.max(0, task.progress))}%`,
-                                }}
-                              />
-                            </div>
-                            <div className="flex flex-wrap items-center justify-between gap-2 text-[11px] font-mono-nums text-[#9CA3AF]">
-                              <span className="inline-flex items-center gap-1.5 truncate max-w-[70%]">
-                                {isCompleted && (
-                                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400 shrink-0" />
-                                )}
-                                <span className="truncate">
-                                  {task.mode === 'system-browser' || isCompleted
-                                    ? 'Enviado para o Gerenciador de Downloads do Android'
-                                    : isError
-                                    ? task.errorMessage || 'Erro no download'
-                                    : `${formatBytes(task.downloadedBytes)} / ${
-                                        task.totalBytes > 0
-                                          ? formatBytes(task.totalBytes)
-                                          : arquivo.tamanho || jogo.tamanho
-                                      }${
-                                        isDownloading
-                                          ? ` • ${formatSpeedMBs(task.speedBytesPerSec)}`
-                                          : ''
-                                      }`}
-                                </span>
-                              </span>
-
-                              <button
-                                type="button"
-                                onClick={onGoToProgress}
-                                className="text-[#8B5CF6] font-semibold hover:underline shrink-0"
-                              >
-                                {task.progress.toFixed(1)}% • Ver fila
-                              </button>
-                            </div>
+                        {isAnyRedirected && (
+                          <div className="flex items-center gap-1.5 text-xs text-emerald-400/90 pt-0.5">
+                            <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
+                            <span>
+                              Redirecionado para o gerenciador de downloads do dispositivo
+                            </span>
                           </div>
                         )}
 
-                        {directUrl && (
-                          <div className="flex justify-end pt-0.5">
-                            <button
-                              type="button"
-                              onClick={() => openSystemDownloadManager(directUrl)}
-                              className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[#9CA3AF] hover:text-white py-1 px-2 rounded-lg hover:bg-[#1B1924] transition-colors"
-                            >
-                              <ExternalLink className="w-3 h-3 shrink-0" />
-                              <span>Baixar via Gerenciador do Sistema</span>
-                            </button>
-                          </div>
+                        {!isAnyRedirected && isDirectError && directTask?.errorMessage && (
+                          <p className="text-xs text-rose-400 pt-0.5">
+                            {directTask.errorMessage}
+                          </p>
                         )}
                       </div>
                     );
@@ -491,6 +423,14 @@ export function GameDetailsView({
             </div>
           </section>
         )}
+
+        {/* Comunidade: Roda no seu celular? */}
+        <DeviceCompatibilitySection
+          jogoId={gameId}
+          jogoTitulo={jogo.titulo}
+          autoOpenReportModal={autoOpenReportModal}
+          onConsumeAutoOpen={onConsumeAutoOpenReport}
+        />
       </main>
 
       {/* Fullscreen Photo Lightbox */}

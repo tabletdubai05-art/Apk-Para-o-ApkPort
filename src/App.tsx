@@ -5,9 +5,9 @@ import {
   ArrowDownUp,
   Check,
   ChevronDown,
-  Download,
   Gamepad2,
   Heart,
+  History,
   Home,
   LayoutGrid,
   List,
@@ -15,6 +15,7 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
+  Trash2,
   X,
 } from 'lucide-react';
 import {
@@ -27,11 +28,15 @@ import { ProgressView } from './components/ProgressView';
 import { SettingsView } from './components/SettingsView';
 import { UpdateModal, type AppUpdateInfo } from './components/UpdateModal';
 import {
-  cancelDownloadTask,
+  communitySupabase,
+  PENDING_REPORT_GAME_KEY,
+} from './lib/communitySupabase';
+import {
+  openP2PIntent,
   restartCleanDownload,
-  startHybridDownload,
 } from './services/downloadEngine';
 import type {
+  DownloadMethod,
   DownloadTask,
   Jogo,
   JogoArquivo,
@@ -47,13 +52,14 @@ import {
 } from './utils/downloadDb';
 import {
   buildDownloadTaskId,
+  buildP2PDownloadTaskId,
   extractFileNameFromUrl,
   parseCategories,
   parseSizeToBytes,
   sanitizeFolderName,
 } from './utils/formatters';
 
-export const VERSAO_APP = '1.0.12';
+export const VERSAO_APP = '1.0.15';
 
 function isValidHttpUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
@@ -153,6 +159,51 @@ export default function App() {
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdateInfo | null>(
     null
   );
+  const [communityLoggedIn, setCommunityLoggedIn] = useState(false);
+  const [autoOpenReportGameId, setAutoOpenReportGameId] = useState<string | null>(
+    null
+  );
+
+  // Track second Supabase auth state to reopen pending game report after OAuth redirect
+  useEffect(() => {
+    let active = true;
+
+    communitySupabase.auth.getSession().then(({ data }) => {
+      if (!active) return;
+      setCommunityLoggedIn(Boolean(data.session?.user));
+    });
+
+    const { data: authListener } = communitySupabase.auth.onAuthStateChange(
+      (_event, session) => {
+        if (!active) return;
+        setCommunityLoggedIn(Boolean(session?.user));
+      }
+    );
+
+    return () => {
+      active = false;
+      authListener.subscription.unsubscribe();
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!communityLoggedIn || jogos.length === 0) return;
+
+    try {
+      const pendingGameId = localStorage.getItem(PENDING_REPORT_GAME_KEY);
+      if (!pendingGameId) return;
+
+      const matched = jogos.find((j) => String(j.id) === pendingGameId);
+      localStorage.removeItem(PENDING_REPORT_GAME_KEY);
+
+      if (matched) {
+        setSelectedGame(matched);
+        setAutoOpenReportGameId(String(matched.id));
+      }
+    } catch {
+      // Ignore storage errors
+    }
+  }, [communityLoggedIn, jogos]);
 
   // Check Supabase `config` table for app updates on startup
   useEffect(() => {
@@ -270,10 +321,11 @@ export default function App() {
 
       const restored: Record<string, DownloadTask> = {};
       for (const task of savedTasks) {
-        // Any download that was running before reload becomes resumable ('paused')
         const normalizedStatus =
-          task.status === 'downloading' || task.status === 'starting'
-            ? 'paused'
+          task.status === 'downloading' ||
+          task.status === 'starting' ||
+          task.status === 'paused'
+            ? 'completed'
             : task.status;
 
         const updatedTask: DownloadTask = {
@@ -281,6 +333,7 @@ export default function App() {
           status: normalizedStatus,
           speedBytesPerSec: 0,
           peers: 0,
+          initiatedAt: task.initiatedAt ?? task.updatedAt,
         };
         restored[task.taskId] = updatedTask;
 
@@ -353,6 +406,7 @@ export default function App() {
         fallbackBase
       );
       const tamanho = arquivo.tamanho || jogo.tamanho;
+      const now = Date.now() + index;
 
       return {
         taskId,
@@ -364,8 +418,9 @@ export default function App() {
         tamanho,
         torrent_url: arquivo.torrent_url ?? null,
         webseed_url: arquivo.url || null,
-        status: 'starting',
+        status: 'completed',
         mode: 'system-browser',
+        method: 'direct',
         progress: 0,
         downloadedBytes: 0,
         totalBytes: parseSizeToBytes(tamanho),
@@ -374,7 +429,48 @@ export default function App() {
         fileName,
         savedPath: undefined,
         errorMessage: undefined,
-        updatedAt: Date.now() + index,
+        initiatedAt: now,
+        updatedAt: now,
+      };
+    },
+    []
+  );
+
+  const createP2PTask = useCallback(
+    (jogo: Jogo, arquivo: JogoArquivo, index: number): DownloadTask => {
+      const gameId = String(jogo.id);
+      const taskId = buildP2PDownloadTaskId(gameId, arquivo, index);
+      const fallbackBase = sanitizeFolderName(jogo.titulo);
+      const fileName = extractFileNameFromUrl(
+        arquivo.torrent_url || arquivo.url,
+        fallbackBase
+      );
+      const tamanho = arquivo.tamanho || jogo.tamanho;
+      const now = Date.now() + index;
+
+      return {
+        taskId,
+        gameId,
+        titulo: jogo.titulo,
+        arquivoNome: arquivo.nome,
+        capa_url: jogo.capa_url,
+        versao: jogo.versao,
+        tamanho,
+        torrent_url: arquivo.torrent_url ?? null,
+        webseed_url: arquivo.url || null,
+        status: 'completed',
+        mode: 'p2p-intent',
+        method: 'p2p',
+        progress: 0,
+        downloadedBytes: 0,
+        totalBytes: parseSizeToBytes(tamanho),
+        speedBytesPerSec: 0,
+        peers: 0,
+        fileName,
+        savedPath: undefined,
+        errorMessage: undefined,
+        initiatedAt: now,
+        updatedAt: now,
       };
     },
     []
@@ -389,12 +485,26 @@ export default function App() {
         [task.taskId]: task,
       }));
 
-      setSelectedGame(null);
-      setActiveTab('progresso');
-
       void restartCleanDownload(task, handleTaskUpdate);
     },
     [createFileTask, handleTaskUpdate]
+  );
+
+  const handleStartP2PDownload = useCallback(
+    (jogo: Jogo, arquivo: JogoArquivo, index: number) => {
+      const torrentUrl = arquivo.torrent_url?.trim();
+      if (!torrentUrl) return;
+
+      openP2PIntent(torrentUrl);
+
+      const task = createP2PTask(jogo, arquivo, index);
+      setDownloads((prev) => ({
+        ...prev,
+        [task.taskId]: task,
+      }));
+      void saveDownloadTask(task);
+    },
+    [createP2PTask]
   );
 
   const handleDownloadAll = useCallback(
@@ -413,9 +523,6 @@ export default function App() {
         return next;
       });
 
-      setSelectedGame(null);
-      setActiveTab('progresso');
-
       for (const task of tasks) {
         void restartCleanDownload(task, handleTaskUpdate);
       }
@@ -423,29 +530,44 @@ export default function App() {
     [createFileTask, handleTaskUpdate]
   );
 
-  const handleResumeDownload = useCallback(
-    (task: DownloadTask) => {
-      void startHybridDownload(task, handleTaskUpdate);
-    },
-    [handleTaskUpdate]
-  );
-
   const handleRetryDownload = useCallback(
-    (task: DownloadTask) => {
-      void restartCleanDownload(task, handleTaskUpdate);
+    (task: DownloadTask, methodOverride?: DownloadMethod) => {
+      const targetMethod: DownloadMethod =
+        methodOverride ??
+        (task.method === 'p2p' || task.mode === 'p2p-intent' ? 'p2p' : 'direct');
+
+      if (targetMethod === 'p2p') {
+        const torrentUrl = task.torrent_url?.trim();
+        if (!torrentUrl) return;
+
+        openP2PIntent(torrentUrl);
+
+        const now = Date.now();
+        const updatedTask: DownloadTask = {
+          ...task,
+          status: 'completed',
+          mode: 'p2p-intent',
+          method: 'p2p',
+          initiatedAt: now,
+          updatedAt: now,
+        };
+        setDownloads((prev) => ({
+          ...prev,
+          [updatedTask.taskId]: updatedTask,
+        }));
+        void saveDownloadTask(updatedTask);
+        return;
+      }
+
+      const directTask: DownloadTask = {
+        ...task,
+        mode: 'system-browser',
+        method: 'direct',
+      };
+      void restartCleanDownload(directTask, handleTaskUpdate);
     },
     [handleTaskUpdate]
   );
-
-  const handleCancelDownload = useCallback((taskId: string) => {
-    void cancelDownloadTask(taskId, () => {
-      setDownloads((prev) => {
-        const next = { ...prev };
-        delete next[taskId];
-        return next;
-      });
-    });
-  }, []);
 
   const handleRemoveFinished = useCallback((taskId: string) => {
     void deleteDownloadTask(taskId);
@@ -457,15 +579,9 @@ export default function App() {
   }, []);
 
   const handleClearCache = useCallback(async () => {
-    const allTasks = Object.values(downloads);
-    for (const t of allTasks) {
-      if (t.status === 'downloading' || t.status === 'starting') {
-        await cancelDownloadTask(t.taskId);
-      }
-    }
     await clearAllDownloadCache();
     setDownloads({});
-  }, [downloads]);
+  }, []);
 
   const handleClearFavorites = useCallback(() => {
     setFavorites([]);
@@ -551,12 +667,6 @@ export default function App() {
     return Object.values(downloads).sort((a, b) => b.updatedAt - a.updatedAt);
   }, [downloads]);
 
-  const activeDownloadsCount = useMemo(() => {
-    return downloadList.filter(
-      (d) => d.status === 'starting' || d.status === 'downloading'
-    ).length;
-  }, [downloadList]);
-
   // Game Details View Overlay
   if (selectedGame) {
     const gameId = String(selectedGame.id);
@@ -566,17 +676,17 @@ export default function App() {
           jogo={selectedGame}
           isFavorite={favorites.includes(gameId)}
           downloads={downloads}
-          onBack={() => setSelectedGame(null)}
+          autoOpenReportModal={autoOpenReportGameId === gameId}
+          onConsumeAutoOpenReport={() => setAutoOpenReportGameId(null)}
+          onBack={() => {
+            setSelectedGame(null);
+            setAutoOpenReportGameId(null);
+          }}
           onToggleFavorite={toggleFavorite}
           onStartFileDownload={handleStartFileDownload}
+          onStartP2PDownload={handleStartP2PDownload}
           onDownloadAll={handleDownloadAll}
-          onCancelDownload={handleCancelDownload}
-          onResumeDownload={handleResumeDownload}
           onRetryDownload={handleRetryDownload}
-          onGoToProgress={() => {
-            setSelectedGame(null);
-            setActiveTab('progresso');
-          }}
         />
         {availableUpdate && (
           <UpdateModal
@@ -963,19 +1073,28 @@ export default function App() {
           </section>
         )}
 
-        {/* Tab: Progresso */}
-        {activeTab === 'progresso' && (
+        {/* Tab: Histórico */}
+        {activeTab === 'historico' && (
           <section className="space-y-4">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between gap-3">
               <h2 className="text-base sm:text-lg font-bold text-white">
-                Progresso ({downloadList.length})
+                Histórico ({downloadList.length})
               </h2>
+
+              {downloadList.length > 0 && (
+                <button
+                  type="button"
+                  onClick={() => void handleClearCache()}
+                  className="min-h-[40px] px-3 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-rose-500/40 text-xs font-semibold text-[#9CA3AF] hover:text-white inline-flex items-center gap-1.5 transition-colors"
+                >
+                  <Trash2 className="w-3.5 h-3.5" />
+                  <span>Limpar histórico</span>
+                </button>
+              )}
             </div>
 
             <ProgressView
               tasks={downloadList}
-              onCancel={handleCancelDownload}
-              onResume={handleResumeDownload}
               onRetry={handleRetryDownload}
               onRemoveFinished={handleRemoveFinished}
             />
@@ -1018,13 +1137,12 @@ export default function App() {
               { id: 'inicio', label: 'Início', icon: Home },
               { id: 'jogos', label: 'Jogos', icon: Gamepad2 },
               { id: 'favoritos', label: 'Favoritos', icon: Heart },
-              { id: 'progresso', label: 'Progresso', icon: Download },
+              { id: 'historico', label: 'Histórico', icon: History },
               { id: 'configuracoes', label: 'Configurações', icon: Settings },
             ] as const
           ).map((item) => {
             const Icon = item.icon;
             const isActive = activeTab === item.id;
-            const showBadge = item.id === 'progresso' && activeDownloadsCount > 0;
 
             return (
               <button
@@ -1043,11 +1161,6 @@ export default function App() {
                       isActive && item.id === 'favoritos' ? 'fill-[#8B5CF6]' : ''
                     }`}
                   />
-                  {showBadge && (
-                    <span className="absolute -top-1.5 -right-2.5 min-w-[17px] h-[17px] px-1 rounded-full bg-[#6366F1] text-white text-[10px] font-bold font-mono-nums flex items-center justify-center">
-                      {activeDownloadsCount}
-                    </span>
-                  )}
                 </div>
                 <span className="text-[10px] font-medium tracking-tight whitespace-nowrap truncate max-w-full">
                   {item.label}

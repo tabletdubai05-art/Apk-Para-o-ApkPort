@@ -28,7 +28,7 @@ export interface Jogo {
   created_at?: string;
 }
 
-export type TabId = 'inicio' | 'jogos' | 'favoritos' | 'progresso' | 'configuracoes';
+export type TabId = 'inicio' | 'jogos' | 'favoritos' | 'historico' | 'configuracoes';
 
 export type SortOption = 'recentes' | 'nome' | 'tamanho';
 
@@ -45,7 +45,10 @@ export type DownloadStatus =
 export type DownloadMode =
   | 'webtorrent'
   | 'http-fallback'
-  | 'system-browser';
+  | 'system-browser'
+  | 'p2p-intent';
+
+export type DownloadMethod = 'direct' | 'p2p';
 
 export interface DownloadTask {
   taskId: string;
@@ -59,6 +62,7 @@ export interface DownloadTask {
   webseed_url?: string | null;
   status: DownloadStatus;
   mode: DownloadMode;
+  method?: DownloadMethod;
   progress: number; // 0 to 100
   downloadedBytes: number;
   totalBytes: number;
@@ -67,5 +71,24 @@ export interface DownloadTask {
   fileName: string;
   savedPath?: string;
   errorMessage?: string;
+  initiatedAt?: number;
   updatedAt: number;
+}
+
+export interface RelatoDesempenho {
+  id: string;
+  jogo_id: string;
+  user_id: string;
+  usuario_nome: string;
+  usuario_avatar?: string | null;
+  marca: string;
+  modelo: string;
+  chipset?: string | null;
+  gpu?: string | null;
+  ram?: string | null;
+  android_versao?: string | null;
+  fps?: number | null;
+  nota: number;
+  tags: string[];
+  created_at: string;
 }

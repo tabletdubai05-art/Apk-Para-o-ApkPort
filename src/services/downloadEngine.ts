@@ -94,6 +94,28 @@ async function openUrlInSystemBrowser(url: string): Promise<void> {
   }
 }
 
+export function openP2PIntent(targetUrl?: string | null): void {
+  if (!targetUrl) return;
+  const trimmed = targetUrl.trim();
+  if (!trimmed) return;
+
+  if (/^https:\/\//i.test(trimmed)) {
+    const urlWithoutHttps = trimmed.replace(/^https:\/\//i, '');
+    const intentUrl = `intent://${urlWithoutHttps}#Intent;scheme=https;type=application/x-bittorrent;package=org.proninyaroslav.libretorrent;end`;
+    window.location.href = intentUrl;
+    return;
+  }
+
+  if (/^http:\/\//i.test(trimmed)) {
+    const urlWithoutHttp = trimmed.replace(/^http:\/\//i, '');
+    const intentUrl = `intent://${urlWithoutHttp}#Intent;scheme=http;type=application/x-bittorrent;package=org.proninyaroslav.libretorrent;end`;
+    window.location.href = intentUrl;
+    return;
+  }
+
+  window.location.href = trimmed;
+}
+
 export async function openSystemDownloadManager(url?: string | null): Promise<void> {
   if (!url) return;
   const directUrl = await resolveDirectDownloadUrl(url);
@@ -104,6 +126,43 @@ export async function startHybridDownload(
   task: DownloadTask,
   onUpdate: TaskUpdateCallback
 ): Promise<void> {
+  const now = Date.now();
+
+  if (task.method === 'p2p' || task.mode === 'p2p-intent') {
+    const torrentUrl = task.torrent_url?.trim();
+    if (!torrentUrl) {
+      const errTask: DownloadTask = {
+        ...task,
+        status: 'error',
+        errorMessage: 'Nenhum link P2P disponível para este arquivo.',
+        updatedAt: now,
+      };
+      await saveDownloadTask(errTask);
+      onUpdate(errTask);
+      return;
+    }
+
+    openP2PIntent(torrentUrl);
+
+    const dispatchedP2P: DownloadTask = {
+      ...task,
+      status: 'completed',
+      mode: 'p2p-intent',
+      method: 'p2p',
+      progress: 0,
+      downloadedBytes: 0,
+      speedBytesPerSec: 0,
+      peers: 0,
+      savedPath: undefined,
+      errorMessage: undefined,
+      initiatedAt: now,
+      updatedAt: now,
+    };
+    await saveDownloadTask(dispatchedP2P);
+    onUpdate(dispatchedP2P);
+    return;
+  }
+
   const url = task.webseed_url || task.torrent_url;
   if (!url) {
     const errTask: DownloadTask = {
@@ -111,7 +170,7 @@ export async function startHybridDownload(
       status: 'error',
       speedBytesPerSec: 0,
       errorMessage: 'Nenhum link de download disponível para este arquivo.',
-      updatedAt: Date.now(),
+      updatedAt: now,
     };
     await saveDownloadTask(errTask);
     onUpdate(errTask);
@@ -129,13 +188,16 @@ export async function startHybridDownload(
     ...task,
     status: 'completed',
     mode: 'system-browser',
+    method: 'direct',
     fileName: nomeRealDoArquivo,
-    progress: 100,
+    progress: 0,
+    downloadedBytes: 0,
     speedBytesPerSec: 0,
     peers: 0,
     savedPath: undefined,
     errorMessage: undefined,
-    updatedAt: Date.now(),
+    initiatedAt: now,
+    updatedAt: now,
   };
   await saveDownloadTask(dispatchedTask);
   onUpdate(dispatchedTask);
@@ -154,20 +216,12 @@ export async function restartCleanDownload(
   onUpdate: TaskUpdateCallback
 ): Promise<void> {
   await clearDownloadChunksOnly(task.taskId);
-
-  const resetTask: DownloadTask = {
-    ...task,
-    status: 'starting',
-    progress: 0,
-    downloadedBytes: 0,
-    speedBytesPerSec: 0,
-    peers: 0,
-    savedPath: undefined,
-    errorMessage: undefined,
-    updatedAt: Date.now(),
-  };
-  await saveDownloadTask(resetTask);
-  onUpdate(resetTask);
-
-  await startHybridDownload(resetTask, onUpdate);
+  await startHybridDownload(
+    {
+      ...task,
+      initiatedAt: Date.now(),
+      updatedAt: Date.now(),
+    },
+    onUpdate
+  );
 }

@@ -204,6 +204,29 @@ export function buildDownloadTaskId(
   return `${String(gameId)}__${index}__${sanitizeFolderName(arquivo.nome)}`;
 }
 
+export function buildP2PDownloadTaskId(
+  gameId: string | number,
+  arquivo: JogoArquivo,
+  index: number
+): string {
+  return `${buildDownloadTaskId(gameId, arquivo, index)}__p2p`;
+}
+
+export function formatHistoryDateTime(timestamp: number): string {
+  if (!timestamp || Number.isNaN(timestamp)) return '';
+  try {
+    return new Intl.DateTimeFormat('pt-BR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    }).format(new Date(timestamp));
+  } catch {
+    return new Date(timestamp).toLocaleString('pt-BR');
+  }
+}
+
 export function parseTutorials(
   tutoriais?: string | TutorialItem[] | null
 ): TutorialItem[] {
