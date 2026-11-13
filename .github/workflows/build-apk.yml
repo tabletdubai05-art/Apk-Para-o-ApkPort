@@ -16,7 +16,7 @@ jobs:
       - name: Configurar Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Configurar Java 17
         uses: actions/setup-java@v4
@@ -32,7 +32,8 @@ jobs:
       - name: Instalar e configurar Capacitor Android
         run: |
           npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 --legacy-peer-deps
-          npx cap init "DroidPort Store" "com.droidport.store" --web-dir=dist || true
+          rm -f capacitor.config.ts capacitor.config.js
+          echo '{"appId":"com.droidport.store","appName":"DroidPort Store","webDir":"dist"}' > capacitor.config.json
           npx cap add android
           npx cap sync
 
