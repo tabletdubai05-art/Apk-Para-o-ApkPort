@@ -53,7 +53,7 @@ import {
   sanitizeFolderName,
 } from './utils/formatters';
 
-export const VERSAO_APP = '1.0.1';
+export const VERSAO_APP = '1.0.2';
 
 function isValidHttpUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
@@ -105,6 +105,7 @@ const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 const FAVORITES_STORAGE_KEY = 'droidport_favorites_v1';
 const VIEW_MODE_STORAGE_KEY = 'droidport_view_mode_v1';
+const INSTALLED_VERSION_STORAGE_KEY = 'droidport_installed_version_v1';
 
 const SORT_LABELS: Record<SortOption, string> = {
   recentes: 'Mais Recentes',
@@ -181,8 +182,22 @@ export default function App() {
           return;
         }
 
+        let effectiveVersion = VERSAO_APP;
+        try {
+          const savedVersion = localStorage.getItem(INSTALLED_VERSION_STORAGE_KEY);
+          if (savedVersion && isRemoteVersionGreater(savedVersion, effectiveVersion)) {
+            effectiveVersion = savedVersion.trim();
+          }
+        } catch {
+          // Ignore storage read errors
+        }
+
         const linkApk = row.link_apk.trim();
-        if (!versaoAtual || !isRemoteVersionGreater(versaoAtual, VERSAO_APP) || !active) {
+        if (
+          !versaoAtual ||
+          !isRemoteVersionGreater(versaoAtual, effectiveVersion) ||
+          !active
+        ) {
           return;
         }
 
@@ -203,7 +218,12 @@ export default function App() {
 
   const handleUpdateNow = useCallback(async () => {
     if (!availableUpdate) return;
-    const linkApk = availableUpdate.linkApk;
+    const { versaoAtual, linkApk } = availableUpdate;
+    try {
+      localStorage.setItem(INSTALLED_VERSION_STORAGE_KEY, versaoAtual);
+    } catch {
+      // Ignore storage quota errors
+    }
     setAvailableUpdate(null);
     if (!linkApk) return;
     try {
