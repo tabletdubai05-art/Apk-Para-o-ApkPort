@@ -26,12 +26,12 @@ jobs:
 
       - name: Instalar dependencias e gerar build web
         run: |
-          npm install
+          npm install --legacy-peer-deps
           npm run build
 
       - name: Instalar e configurar Capacitor Android
         run: |
-          npm install @capacitor/core @capacitor/cli @capacitor/android
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 --legacy-peer-deps
           npx cap init "DroidPort Store" "com.droidport.store" --web-dir=dist || true
           npx cap add android
           npx cap sync
@@ -51,3 +51,4 @@ jobs:
         with:
           name: DroidPort-Store-APK
           path: android/app/build/outputs/apk/debug/app-debug.apk
+          
