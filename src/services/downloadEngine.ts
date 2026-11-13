@@ -1,4 +1,4 @@
-import { Capacitor } from '@capacitor/core';
+import { Capacitor, CapacitorHttp } from '@capacitor/core';
 import { Directory, Filesystem } from '@capacitor/filesystem';
 import type { PluginListenerHandle } from '@capacitor/core';
 import type { DownloadTask } from '../types/game';
@@ -14,6 +14,13 @@ import {
   parseSizeToBytes,
   sanitizeFolderName,
 } from '../utils/formatters';
+
+const ANDROID_CHROME_USER_AGENT =
+  'Mozilla/5.0 (Linux; Android 13) AppleWebKit/537.36 Chrome/120.0.0.0 Mobile Safari/537.36';
+
+const DOWNLOAD_HEADERS: Record<string, string> = {
+  'User-Agent': ANDROID_CHROME_USER_AGENT,
+};
 
 interface WebTorrentFile {
   name: string;
@@ -58,6 +65,24 @@ interface ActiveController {
 const activeControllers = new Map<string, ActiveController>();
 let activeNativeCount = 0;
 
+export function openSystemDownloadManager(url?: string | null): void {
+  if (!url) return;
+  if (Capacitor.isNativePlatform()) {
+    window.open(url, '_system');
+    return;
+  }
+  const anchor = document.createElement('a');
+  anchor.href = url;
+  anchor.target = '_blank';
+  anchor.rel = 'noopener noreferrer';
+  anchor.style.display = 'none';
+  document.body.appendChild(anchor);
+  anchor.click();
+  setTimeout(() => {
+    document.body.removeChild(anchor);
+  }, 500);
+}
+
 function triggerBrowserSave(blobUrl: string, fileName: string) {
   const anchor = document.createElement('a');
   anchor.href = blobUrl;
@@ -68,6 +93,86 @@ function triggerBrowserSave(blobUrl: string, fileName: string) {
   setTimeout(() => {
     document.body.removeChild(anchor);
   }, 1500);
+}
+
+function parseArchiveOrgDownloadUrl(
+  rawUrl: string
+): { itemId: string; fileSubPath: string } | null {
+  try {
+    const parsed = new URL(rawUrl);
+    if (!parsed.hostname.toLowerCase().includes('archive.org')) {
+      return null;
+    }
+    if (!parsed.pathname.startsWith('/download/')) {
+      return null;
+    }
+    const remainder = parsed.pathname.replace(/^\/download\//, '');
+    const segments = remainder.split('/').filter(Boolean);
+    if (segments.length < 2) {
+      return null;
+    }
+    const itemId = decodeURIComponent(segments[0]);
+    const fileSubPath = segments.slice(1).join('/');
+    return { itemId, fileSubPath };
+  } catch {
+    return null;
+  }
+}
+
+async function resolveArchiveOrgDirectUrls(rawUrl: string): Promise<string[]> {
+  const parsed = parseArchiveOrgDownloadUrl(rawUrl);
+  if (!parsed) return [];
+
+  const metadataUrl = `https://archive.org/metadata/${encodeURIComponent(parsed.itemId)}`;
+
+  try {
+    let data: Record<string, unknown> | null = null;
+
+    if (Capacitor.isNativePlatform()) {
+      const response = await CapacitorHttp.get({
+        url: metadataUrl,
+        headers: DOWNLOAD_HEADERS,
+        connectTimeout: 15000,
+        readTimeout: 15000,
+      });
+      if (response.status >= 200 && response.status < 300 && response.data) {
+        data =
+          typeof response.data === 'string'
+            ? (JSON.parse(response.data) as Record<string, unknown>)
+            : (response.data as Record<string, unknown>);
+      }
+    } else {
+      const res = await fetch(metadataUrl);
+      if (res.ok) {
+        data = (await res.json()) as Record<string, unknown>;
+      }
+    }
+
+    if (!data || typeof data.dir !== 'string') {
+      return [];
+    }
+
+    const dir = data.dir.startsWith('/') ? data.dir : `/${data.dir}`;
+    const servers: string[] = [];
+
+    if (typeof data.d1 === 'string' && data.d1) servers.push(data.d1);
+    if (typeof data.d2 === 'string' && data.d2 && !servers.includes(data.d2)) {
+      servers.push(data.d2);
+    }
+    if (Array.isArray(data.workable_servers)) {
+      for (const s of data.workable_servers) {
+        if (typeof s === 'string' && s && !servers.includes(s)) {
+          servers.push(s);
+        }
+      }
+    }
+
+    return servers.map(
+      (server) => `https://${server}${dir}/${parsed.fileSubPath}`
+    );
+  } catch {
+    return [];
+  }
 }
 
 async function ensureWebTorrentLoaded(): Promise<typeof window.WebTorrent | null> {
@@ -183,13 +288,14 @@ async function startCapacitorNativeDownload(
       // Directory may already exist
     }
 
+    let activeAttemptUrl = url;
     let lastBytes = 0;
     let lastTime = performance.now();
 
     listenerHandle = await Filesystem.addListener('progress', (status) => {
       if (cancelled) return;
 
-      if (status.url !== url && activeNativeCount > 1) {
+      if (status.url !== activeAttemptUrl && activeNativeCount > 1) {
         return;
       }
 
@@ -227,12 +333,45 @@ async function startCapacitorNativeDownload(
       void saveDownloadTask(updated);
     });
 
-    await Filesystem.downloadFile({
-      url,
-      path: targetPath,
-      directory: Directory.ExternalStorage,
-      progress: true,
-    });
+    const downloadWithHeaders = async (targetUrl: string) => {
+      activeAttemptUrl = targetUrl;
+      lastBytes = 0;
+      lastTime = performance.now();
+      return Filesystem.downloadFile({
+        url: targetUrl,
+        path: targetPath,
+        directory: Directory.ExternalStorage,
+        progress: true,
+        headers: DOWNLOAD_HEADERS,
+        connectTimeout: 30000,
+        readTimeout: 90000,
+      });
+    };
+
+    let lastError: unknown = null;
+    let downloadedSuccessfully = false;
+
+    try {
+      await downloadWithHeaders(url);
+      downloadedSuccessfully = true;
+    } catch (primaryErr) {
+      lastError = primaryErr;
+
+      // If archive.org timed out or refused initial URL, resolve direct mirror URLs via Metadata API
+      if (!cancelled && parseArchiveOrgDownloadUrl(url)) {
+        const mirrors = await resolveArchiveOrgDirectUrls(url);
+        for (const mirrorUrl of mirrors) {
+          if (cancelled) break;
+          try {
+            await downloadWithHeaders(mirrorUrl);
+            downloadedSuccessfully = true;
+            break;
+          } catch (mirrorErr) {
+            lastError = mirrorErr;
+          }
+        }
+      }
+    }
 
     await cleanupListener();
     activeNativeCount = Math.max(0, activeNativeCount - 1);
@@ -247,6 +386,10 @@ async function startCapacitorNativeDownload(
         // Ignore cleanup failure
       }
       return;
+    }
+
+    if (!downloadedSuccessfully) {
+      throw lastError || new Error('Tempo limite ou erro ao conectar ao servidor.');
     }
 
     const completedTask: DownloadTask = {
@@ -273,7 +416,7 @@ async function startCapacitorNativeDownload(
     const message =
       err instanceof Error
         ? err.message
-        : 'Falha no download nativo. Toque em Tentar novamente para reiniciar.';
+        : 'Falha ou timeout ao baixar do servidor. Tente novamente ou use o Gerenciador do Sistema.';
 
     const erroredTask: DownloadTask = {
       ...startingTask,
@@ -323,16 +466,42 @@ async function startFetchStreamDownload(
     let nextChunkIndex = saved.nextIndex;
     const accumulatedChunks: Uint8Array[] = [...saved.chunks];
 
-    const headers: HeadersInit = {};
-    if (existingBytes > 0) {
-      headers['Range'] = `bytes=${existingBytes}-`;
-    }
+    const makeFetchRequest = async (targetUrl: string) => {
+      const headers: HeadersInit = {};
+      if (existingBytes > 0) {
+        headers['Range'] = `bytes=${existingBytes}-`;
+      }
+      return fetch(targetUrl, {
+        method: 'GET',
+        headers,
+        signal: abortController.signal,
+      });
+    };
 
-    const response = await fetch(url, {
-      method: 'GET',
-      headers,
-      signal: abortController.signal,
-    });
+    let response: Response;
+    try {
+      response = await makeFetchRequest(url);
+    } catch (firstErr) {
+      if (parseArchiveOrgDownloadUrl(url) && !isCancelled()) {
+        const mirrors = await resolveArchiveOrgDirectUrls(url);
+        let mirrorResponse: Response | null = null;
+        for (const mirrorUrl of mirrors) {
+          try {
+            const candidate = await makeFetchRequest(mirrorUrl);
+            if (candidate.ok || candidate.status === 206) {
+              mirrorResponse = candidate;
+              break;
+            }
+          } catch {
+            // Try next mirror
+          }
+        }
+        if (!mirrorResponse) throw firstErr;
+        response = mirrorResponse;
+      } else {
+        throw firstErr;
+      }
+    }
 
     if (!response.ok && response.status !== 206) {
       throw new Error(`HTTP ${response.status} ao baixar arquivo.`);

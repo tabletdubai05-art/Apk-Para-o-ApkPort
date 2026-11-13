@@ -1,12 +1,14 @@
 import {
   CheckCircle2,
   Download,
+  ExternalLink,
   Play,
   RotateCcw,
   Trash2,
   Users,
   X,
 } from 'lucide-react';
+import { openSystemDownloadManager } from '../services/downloadEngine';
 import type { DownloadTask } from '../types/game';
 import { formatBytes, formatSpeedMBs } from '../utils/formatters';
 import { GameCover } from './GameCover';
@@ -49,6 +51,7 @@ export function ProgressView({
         const isPaused = task.status === 'paused';
         const isCompleted = task.status === 'completed';
         const isError = task.status === 'error';
+        const fallbackUrl = task.webseed_url || task.torrent_url;
 
         return (
           <article
@@ -234,6 +237,19 @@ export function ProgressView({
                   >
                     <RotateCcw className="w-4 h-4" />
                     <span>Baixar novamente</span>
+                  </button>
+                </div>
+              )}
+
+              {fallbackUrl && !isCompleted && (
+                <div className="flex justify-end">
+                  <button
+                    type="button"
+                    onClick={() => openSystemDownloadManager(fallbackUrl)}
+                    className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[#9CA3AF] hover:text-white py-1 px-2 rounded-lg hover:bg-[#0F0E13]/60 transition-colors"
+                  >
+                    <ExternalLink className="w-3 h-3 shrink-0" />
+                    <span>Baixar via Gerenciador do Sistema</span>
                   </button>
                 </div>
               )}

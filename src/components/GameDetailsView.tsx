@@ -5,12 +5,14 @@ import {
   ChevronLeft,
   ChevronRight,
   Download,
+  ExternalLink,
   FileArchive,
   Heart,
   Play,
   RotateCcw,
   X,
 } from 'lucide-react';
+import { openSystemDownloadManager } from '../services/downloadEngine';
 import type { DownloadTask, Jogo, JogoArquivo } from '../types/game';
 import {
   buildDownloadTaskId,
@@ -276,6 +278,23 @@ export function GameDetailsView({
                                 {task.progress.toFixed(1)}% • Ver fila
                               </button>
                             </div>
+                          </div>
+                        )}
+
+                        {(arquivo.url || arquivo.torrent_url) && (
+                          <div className="flex justify-end pt-0.5">
+                            <button
+                              type="button"
+                              onClick={() =>
+                                openSystemDownloadManager(
+                                  arquivo.url || arquivo.torrent_url
+                                )
+                              }
+                              className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[#9CA3AF] hover:text-white py-1 px-2 rounded-lg hover:bg-[#1B1924] transition-colors"
+                            >
+                              <ExternalLink className="w-3 h-3 shrink-0" />
+                              <span>Baixar via Gerenciador do Sistema</span>
+                            </button>
                           </div>
                         )}
                       </div>
