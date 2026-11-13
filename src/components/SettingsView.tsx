@@ -115,7 +115,7 @@ export function SettingsView({
             dedicada a ports de jogos para Android.
           </p>
           <div className="pt-1 space-y-1 font-mono-nums">
-            <p>Versão: {appVersion}</p>
+            <p>Versão {appVersion}</p>
             <p>Motor de Download: Navegador Nativo / Gerenciador do Sistema Android</p>
             <p>Persistência: localStorage (favoritos) + IndexedDB (histórico de downloads)</p>
           </div>

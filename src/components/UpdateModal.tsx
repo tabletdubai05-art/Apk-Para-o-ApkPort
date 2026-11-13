@@ -39,7 +39,7 @@ export function UpdateModal({
                 id="update-modal-title"
                 className="text-base sm:text-lg font-extrabold text-white leading-snug"
               >
-                {`Nova versão disponível (${update.versaoAtual})`}
+                {`Nova Atualização Disponível (${update.versaoAtual})`}
               </h2>
               <p className="text-xs text-[#9CA3AF] mt-0.5">
                 Uma nova versão do DroidPort Store está pronta para instalar.

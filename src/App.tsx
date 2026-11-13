@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Browser } from '@capacitor/browser';
 import { createClient } from '@supabase/supabase-js';
 import {
   ArrowDownUp,
@@ -160,7 +161,7 @@ export default function App() {
       try {
         const { data, error: configError } = await supabase
           .from('config')
-          .select('*')
+          .select('versao_atual, link_apk')
           .limit(1);
 
         if (configError || !data || data.length === 0) return;
@@ -200,11 +201,14 @@ export default function App() {
     };
   }, []);
 
-  const handleUpdateNow = useCallback(() => {
+  const handleUpdateNow = useCallback(async () => {
     if (!availableUpdate) return;
     const linkApk = availableUpdate.linkApk;
     setAvailableUpdate(null);
-    if (linkApk) {
+    if (!linkApk) return;
+    try {
+      await Browser.open({ url: linkApk });
+    } catch {
       window.open(linkApk, '_system');
     }
   }, [availableUpdate]);
