@@ -53,7 +53,7 @@ import {
   sanitizeFolderName,
 } from './utils/formatters';
 
-export const VERSAO_APP = '1.0.2';
+export const VERSAO_APP = '1.0.12';
 
 function isValidHttpUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;

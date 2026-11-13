@@ -1,16 +1,21 @@
 import { useState } from 'react';
 import {
   ArrowLeft,
+  Check,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
   ExternalLink,
   FileArchive,
   Heart,
+  Info,
   Play,
+  PlayCircle,
   RotateCcw,
   X,
+  Zap,
 } from 'lucide-react';
 import { openSystemDownloadManager } from '../services/downloadEngine';
 import type { DownloadTask, Jogo, JogoArquivo } from '../types/game';
@@ -20,6 +25,7 @@ import {
   formatCategoriesDot,
   formatSpeedMBs,
   parsePhotos,
+  parseTutorials,
   parseVideoSource,
   resolveGameFiles,
 } from '../utils/formatters';
@@ -53,11 +59,59 @@ export function GameDetailsView({
   onGoToProgress,
 }: GameDetailsViewProps) {
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
+  const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const gameId = String(jogo.id);
   const categoriesDot = formatCategoriesDot(jogo.categoria);
   const video = parseVideoSource(jogo.video_url);
   const photos = parsePhotos(jogo.fotos_urls);
   const files = resolveGameFiles(jogo);
+  const tutorials = parseTutorials(jogo.tutoriais);
+  const hasAnyTorrent = files.some((item) => Boolean(item.torrent_url?.trim()));
+
+  const copyToClipboard = async (text: string, key: string) => {
+    const trimmed = text.trim();
+    if (!trimmed) return;
+    try {
+      await navigator.clipboard.writeText(trimmed);
+      setCopiedKey(key);
+      setTimeout(() => setCopiedKey((prev) => (prev === key ? null : prev)), 2000);
+    } catch {
+      const textarea = document.createElement('textarea');
+      textarea.value = trimmed;
+      textarea.style.position = 'fixed';
+      textarea.style.opacity = '0';
+      document.body.appendChild(textarea);
+      textarea.select();
+      try {
+        document.execCommand('copy');
+        setCopiedKey(key);
+        setTimeout(() => setCopiedKey((prev) => (prev === key ? null : prev)), 2000);
+      } finally {
+        document.body.removeChild(textarea);
+      }
+    }
+  };
+
+  const openP2PLink = (targetUrl: string) => {
+    const trimmed = targetUrl.trim();
+    if (!trimmed) return;
+
+    if (/^https:\/\//i.test(trimmed)) {
+      const urlWithoutHttps = trimmed.replace(/^https:\/\//i, '');
+      const intentUrl = `intent://${urlWithoutHttps}#Intent;scheme=https;type=application/x-bittorrent;package=org.proninyaroslav.libretorrent;end`;
+      window.location.href = intentUrl;
+      return;
+    }
+
+    if (/^http:\/\//i.test(trimmed)) {
+      const urlWithoutHttp = trimmed.replace(/^http:\/\//i, '');
+      const intentUrl = `intent://${urlWithoutHttp}#Intent;scheme=http;type=application/x-bittorrent;package=org.proninyaroslav.libretorrent;end`;
+      window.location.href = intentUrl;
+      return;
+    }
+
+    window.location.href = trimmed;
+  };
 
   return (
     <div className="min-h-screen bg-[#0F0E13] text-white pb-28">
@@ -117,6 +171,14 @@ export function GameDetailsView({
               </p>
             </div>
 
+            {/* Sobre o Port */}
+            <div className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-4 space-y-2">
+              <h2 className="text-sm font-bold text-white">Sobre o Port</h2>
+              <p className="text-sm text-[#D1D5DB] leading-relaxed whitespace-pre-line">
+                {jogo.descricao || 'Nenhuma descrição informada para este port.'}
+              </p>
+            </div>
+
             {/* Arquivos Disponíveis */}
             <div className="space-y-3 pt-1">
               <div className="flex items-center justify-between gap-3">
@@ -150,79 +212,103 @@ export function GameDetailsView({
                     const isPaused = task?.status === 'paused';
                     const isCompleted = task?.status === 'completed';
                     const isError = task?.status === 'error';
+                    const directUrl = arquivo.url?.trim() || '';
+                    const fileTorrentUrl = arquivo.torrent_url?.trim() || '';
 
                     return (
                       <div
                         key={taskId}
-                        className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-3.5 space-y-2.5"
+                        className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-3.5 space-y-3"
                       >
-                        <div className="flex items-center justify-between gap-3">
-                          <div className="flex items-center gap-3 min-w-0">
-                            <div className="w-10 h-10 rounded-xl bg-[#1B1924] border border-[#2A2738] flex items-center justify-center text-[#8B5CF6] shrink-0">
-                              <FileArchive className="w-5 h-5" />
-                            </div>
-                            <div className="min-w-0">
-                              <p className="text-sm font-bold text-white truncate">
-                                {arquivo.nome}
-                              </p>
-                              <p className="text-xs text-[#9CA3AF] font-mono-nums">
-                                {arquivo.tamanho || jogo.tamanho || 'Tamanho variável'}
-                              </p>
-                            </div>
+                        <div className="flex items-center gap-3 min-w-0">
+                          <div className="w-10 h-10 rounded-xl bg-[#1B1924] border border-[#2A2738] flex items-center justify-center text-[#8B5CF6] shrink-0">
+                            <FileArchive className="w-5 h-5" />
                           </div>
+                          <div className="min-w-0 flex-1">
+                            <p className="text-sm font-bold text-white truncate">
+                              {arquivo.nome}
+                            </p>
+                            <p className="text-xs text-[#9CA3AF] font-mono-nums">
+                              {arquivo.tamanho || jogo.tamanho || 'Tamanho variável'}
+                            </p>
+                          </div>
+                        </div>
 
-                          {(!task || task.status === 'cancelled') && (
+                        {/* Side-by-side Download Direto + Baixar P2P + Copiar Link P2P */}
+                        <div className="flex flex-wrap items-center gap-2">
+                          {directUrl && (!task || task.status === 'cancelled') && (
                             <button
                               type="button"
                               onClick={() => onStartFileDownload(jogo, arquivo, index)}
-                              className="min-h-[44px] px-4 rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-white text-xs sm:text-sm font-semibold inline-flex items-center gap-1.5 shrink-0 transition-colors"
+                              className="flex-1 min-w-[130px] min-h-[44px] px-3.5 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
                             >
-                              <Download className="w-4 h-4" />
-                              <span>Baixar</span>
+                              <Download className="w-4 h-4 shrink-0" />
+                              <span>Download Direto</span>
                             </button>
                           )}
 
-                          {isDownloading && (
+                          {directUrl && isDownloading && (
                             <button
                               type="button"
                               onClick={() => onCancelDownload(taskId)}
-                              className="min-h-[44px] px-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold shrink-0"
+                              className="flex-1 min-w-[130px] min-h-[44px] px-3.5 rounded-xl bg-rose-500/10 border border-rose-500/30 text-rose-400 text-xs font-semibold inline-flex items-center justify-center"
                             >
                               Cancelar
                             </button>
                           )}
 
-                          {isPaused && (
+                          {directUrl && isPaused && (
                             <button
                               type="button"
                               onClick={() => onResumeDownload(task)}
-                              className="min-h-[44px] px-3.5 rounded-xl bg-[#6366F1] text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
+                              className="flex-1 min-w-[130px] min-h-[44px] px-3.5 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5"
                             >
-                              <Play className="w-3.5 h-3.5" />
+                              <Play className="w-3.5 h-3.5 shrink-0" />
                               <span>Retomar</span>
                             </button>
                           )}
 
-                          {isError && (
+                          {directUrl && (isError || isCompleted) && (
                             <button
                               type="button"
                               onClick={() => onRetryDownload(task)}
-                              className="min-h-[44px] px-3.5 rounded-xl bg-[#6366F1] text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
+                              className="flex-1 min-w-[130px] min-h-[44px] px-3.5 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
                             >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>Tentar novamente</span>
+                              <RotateCcw className="w-3.5 h-3.5 shrink-0" />
+                              <span>Download Direto</span>
                             </button>
                           )}
 
-                          {isCompleted && (
-                            <button
-                              type="button"
-                              onClick={() => onRetryDownload(task)}
-                              className="min-h-[44px] px-3.5 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs font-semibold inline-flex items-center gap-1.5 shrink-0"
-                            >
-                              <RotateCcw className="w-3.5 h-3.5" />
-                              <span>Baixar novamente</span>
-                            </button>
+                          {fileTorrentUrl && (
+                            <>
+                              <button
+                                type="button"
+                                onClick={() => openP2PLink(fileTorrentUrl)}
+                                className="flex-1 min-w-[125px] min-h-[44px] px-3.5 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 shadow-md shadow-[#6366F1]/25 active:scale-[0.98] transition-all"
+                              >
+                                <Zap className="w-4 h-4 shrink-0" />
+                                <span>Baixar P2P</span>
+                              </button>
+
+                              <button
+                                type="button"
+                                onClick={() => copyToClipboard(fileTorrentUrl, taskId)}
+                                aria-label={`Copiar link P2P de ${arquivo.nome}`}
+                                title="Copiar link P2P"
+                                className="min-h-[44px] min-w-[44px] px-3 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors shrink-0"
+                              >
+                                {copiedKey === taskId ? (
+                                  <>
+                                    <Check className="w-4 h-4 text-emerald-400 shrink-0" />
+                                    <span className="text-emerald-400 hidden sm:inline">
+                                      Copiado
+                                    </span>
+                                  </>
+                                ) : (
+                                  <Copy className="w-4 h-4 text-[#8B5CF6] shrink-0" />
+                                )}
+                              </button>
+                            </>
                           )}
                         </div>
 
@@ -275,15 +361,11 @@ export function GameDetailsView({
                           </div>
                         )}
 
-                        {(arquivo.url || arquivo.torrent_url) && (
+                        {directUrl && (
                           <div className="flex justify-end pt-0.5">
                             <button
                               type="button"
-                              onClick={() =>
-                                openSystemDownloadManager(
-                                  arquivo.url || arquivo.torrent_url
-                                )
-                              }
+                              onClick={() => openSystemDownloadManager(directUrl)}
                               className="inline-flex items-center gap-1.5 text-[11px] font-medium text-[#9CA3AF] hover:text-white py-1 px-2 rounded-lg hover:bg-[#1B1924] transition-colors"
                             >
                               <ExternalLink className="w-3 h-3 shrink-0" />
@@ -296,17 +378,66 @@ export function GameDetailsView({
                   })}
                 </div>
               )}
+
+              {hasAnyTorrent && (
+                <div className="rounded-xl bg-[#0F0E13]/85 border border-[#2A2738] px-3.5 py-2.5 flex items-start gap-2.5">
+                  <Info className="w-4 h-4 text-[#8B5CF6] shrink-0 mt-0.5" />
+                  <p className="text-xs text-[#9CA3AF] leading-relaxed">
+                    Dica para velocidade máxima: Para jogos pesados (acima de 2 GB), recomendamos usar o app gratuito LibreTorrent no botão P2P acima. Ele permite pausar o download e baixa em velocidade máxima.
+                  </p>
+                </div>
+              )}
             </div>
           </div>
         </section>
 
-        {/* Description */}
-        <section className="rounded-2xl bg-[#1B1924] border border-[#2A2738] p-5 space-y-2.5">
-          <h2 className="text-base font-bold text-white">Sobre o Port</h2>
-          <p className="text-sm text-[#D1D5DB] leading-relaxed whitespace-pre-line">
-            {jogo.descricao || 'Nenhuma descrição informada para este port.'}
-          </p>
-        </section>
+        {/* Vídeos Tutoriais */}
+        {tutorials.length > 0 && (
+          <section className="space-y-3">
+            <div className="flex items-center gap-2">
+              <PlayCircle className="w-5 h-5 text-[#8B5CF6] shrink-0" />
+              <h2 className="text-base font-bold text-white">Vídeos Tutoriais</h2>
+            </div>
+
+            <div className="space-y-3">
+              {tutorials.map((tutorial, idx) => {
+                const parsedTutorialVideo = parseVideoSource(tutorial.url);
+                if (!parsedTutorialVideo) return null;
+
+                return (
+                  <div
+                    key={`${tutorial.url}-${idx}`}
+                    className="rounded-2xl bg-[#1B1924] border border-[#2A2738] p-4 space-y-3"
+                  >
+                    <h3 className="text-sm sm:text-base font-bold text-white leading-snug">
+                      {tutorial.titulo}
+                    </h3>
+
+                    <div className="rounded-xl overflow-hidden bg-[#0F0E13] border border-[#2A2738] aspect-video">
+                      {parsedTutorialVideo.type === 'youtube' ? (
+                        <iframe
+                          src={parsedTutorialVideo.src}
+                          title={tutorial.titulo}
+                          className="w-full h-full"
+                          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                          allowFullScreen
+                        />
+                      ) : (
+                        <video
+                          src={parsedTutorialVideo.src}
+                          controls
+                          playsInline
+                          preload="metadata"
+                          className="w-full h-full object-contain bg-black"
+                        />
+                      )}
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </section>
+        )}
 
         {/* Video Player */}
         {video && (

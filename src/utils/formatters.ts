@@ -1,4 +1,4 @@
-import type { Jogo, JogoArquivo } from '../types/game';
+import type { Jogo, JogoArquivo, TutorialItem } from '../types/game';
 
 export function parseCategories(categoria?: string | null): string[] {
   if (!categoria) return [];
@@ -71,9 +71,9 @@ export function parseVideoSource(videoUrl?: string | null): ParsedVideo | null {
   if (!url) return null;
 
   try {
-    // Handle YouTube URLs: watch?v=, youtu.be/, shorts/, embed/
+    // Handle YouTube URLs: watch?v=, youtu.be/, shorts/, live/, embed/
     const ytMatch = url.match(
-      /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
+      /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
     );
     if (ytMatch && ytMatch[1]) {
       return {
@@ -154,13 +154,28 @@ export function resolveGameFiles(jogo: Jogo): JogoArquivo[] {
 
   if (Array.isArray(rawArquivos) && rawArquivos.length > 0) {
     const valid = rawArquivos
-      .filter((item) => item && (typeof item.url === 'string' && item.url.trim() !== ''))
-      .map((item, idx) => ({
-        nome: (item.nome || `Arquivo ${idx + 1}`).trim(),
-        tamanho: (item.tamanho || jogo.tamanho || '').trim(),
-        url: item.url.trim(),
-        torrent_url: item.torrent_url ?? (idx === 0 ? jogo.torrent_url : null),
-      }));
+      .filter(
+        (item) =>
+          item &&
+          ((typeof item.url === 'string' && item.url.trim() !== '') ||
+            (typeof item.torrent_url === 'string' && item.torrent_url.trim() !== ''))
+      )
+      .map((item, idx) => {
+        const itemUrl = typeof item.url === 'string' ? item.url.trim() : '';
+        const itemTorrent =
+          typeof item.torrent_url === 'string' && item.torrent_url.trim() !== ''
+            ? item.torrent_url.trim()
+            : idx === 0 && typeof jogo.torrent_url === 'string' && jogo.torrent_url.trim() !== ''
+            ? jogo.torrent_url.trim()
+            : null;
+
+        return {
+          nome: (item.nome || `Arquivo ${idx + 1}`).trim(),
+          tamanho: (item.tamanho || jogo.tamanho || '').trim(),
+          url: itemUrl,
+          torrent_url: itemTorrent,
+        };
+      });
 
     if (valid.length > 0) {
       return valid;
@@ -173,7 +188,7 @@ export function resolveGameFiles(jogo: Jogo): JogoArquivo[] {
         nome: 'APK Principal',
         tamanho: jogo.tamanho || '',
         url: jogo.webseed_url?.trim() || '',
-        torrent_url: jogo.torrent_url || null,
+        torrent_url: jogo.torrent_url?.trim() || null,
       },
     ];
   }
@@ -187,4 +202,38 @@ export function buildDownloadTaskId(
   index: number
 ): string {
   return `${String(gameId)}__${index}__${sanitizeFolderName(arquivo.nome)}`;
+}
+
+export function parseTutorials(
+  tutoriais?: string | TutorialItem[] | null
+): TutorialItem[] {
+  if (!tutoriais) return [];
+
+  let parsed: unknown = tutoriais;
+  if (typeof tutoriais === 'string') {
+    const trimmed = tutoriais.trim();
+    if (!trimmed) return [];
+    try {
+      parsed = JSON.parse(trimmed);
+    } catch {
+      return [];
+    }
+  }
+
+  if (!Array.isArray(parsed)) return [];
+
+  return parsed
+    .filter(
+      (item): item is { titulo?: unknown; url?: unknown } =>
+        Boolean(item) && typeof item === 'object'
+    )
+    .map((item, idx) => {
+      const url = typeof item.url === 'string' ? item.url.trim() : '';
+      const titulo =
+        typeof item.titulo === 'string' && item.titulo.trim()
+          ? item.titulo.trim()
+          : `Tutorial ${idx + 1}`;
+      return { titulo, url };
+    })
+    .filter((item) => item.url !== '');
 }

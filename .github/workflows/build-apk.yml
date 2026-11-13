@@ -41,6 +41,13 @@ jobs:
           echo '{"appId":"com.droidport.store","appName":"DroidPort Store","webDir":"dist"}' > capacitor.config.json
           npx cap add android
 
+      - name: Permitir visibilidade do LibreTorrent no AndroidManifest
+        run: |
+          MANIFEST="android/app/src/main/AndroidManifest.xml"
+          if ! grep -q "org.proninyaroslav.libretorrent" "$MANIFEST"; then
+            sed -i 's/<\/manifest>/<queries><package android:name="org.proninyaroslav.libretorrent" \/><\/queries><\/manifest>/' "$MANIFEST"
+          fi
+
       - name: Substituir icone do Android pelo icon.png
         run: |
           mkdir -p assets

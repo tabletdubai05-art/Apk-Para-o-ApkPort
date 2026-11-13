@@ -5,6 +5,11 @@ export interface JogoArquivo {
   torrent_url?: string | null;
 }
 
+export interface TutorialItem {
+  titulo: string;
+  url: string;
+}
+
 export interface Jogo {
   id: number | string;
   titulo: string;
@@ -19,6 +24,7 @@ export interface Jogo {
   torrent_url?: string | null;
   webseed_url?: string | null;
   arquivos?: JogoArquivo[] | string | null;
+  tutoriais?: string | TutorialItem[] | null;
   created_at?: string;
 }
 
