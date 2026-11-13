@@ -29,27 +29,38 @@ jobs:
           npm install --legacy-peer-deps
           npm run build
 
-      - name: Instalar e configurar Capacitor Android
+      - name: Instalar e configurar Capacitor Android e Plugins
         run: |
-          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 --legacy-peer-deps
+          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/filesystem@6 --legacy-peer-deps
           rm -f capacitor.config.ts capacitor.config.js
-          echo '{"appId":"com.droidport.store","appName":"DroidPort Store","webDir":"dist"}' > capacitor.config.json
+          echo '{"appId":"com.droidport.store","appName":"DroidPort Store","webDir":"dist","plugins":{"CapacitorHttp":{"enabled":true}}}' > capacitor.config.json
           npx cap add android
+
+      - name: Substituir icone do Android pelo icon.png
+        run: |
+          mkdir -p assets
+          if [ -f "public/icon.png" ]; then cp public/icon.png assets/icon.png; fi
+          if [ -f "icon.png" ]; then cp icon.png assets/icon.png; fi
+          if [ -f "assets/icon.png" ]; then
+            npx @capacitor/assets generate --android
+          fi
           npx cap sync
 
-      - name: Liberar internet e trafego HTTP no Android
+      - name: Configurar permissoes de rede e armazenamento no Android
         run: |
-          sed -i 's/<application/<application android:usesCleartextTraffic="true"/g' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<application/<application android:usesCleartextTraffic="true" android:requestLegacyExternalStorage="true"/g' android/app/src/main/AndroidManifest.xml
+          sed -i 's/<uses-permission android:name="android.permission.INTERNET" \/>/<uses-permission android:name="android.permission.INTERNET" \/><uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" \/><uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" \/><uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" \/>/g' android/app/src/main/AndroidManifest.xml
 
-      - name: Compilar APK Debug
+      - name: Compilar e Renomear APK
         run: |
           cd android
           chmod +x gradlew
           ./gradlew assembleDebug
+          cp app/build/outputs/apk/debug/app-debug.apk ../DroidPort-Store.apk
 
-      - name: Disponibilizar APK para download
+      - name: Disponibilizar DroidPort-Store.apk para download
         uses: actions/upload-artifact@v4
         with:
           name: DroidPort-Store-APK
-          path: android/app/build/outputs/apk/debug/app-debug.apk
+          path: DroidPort-Store.apk
           
