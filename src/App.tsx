@@ -24,8 +24,10 @@ import {
 import { GameDetailsView } from './components/GameDetailsView';
 import { ProgressView } from './components/ProgressView';
 import { SettingsView } from './components/SettingsView';
+import { UpdateModal, type AppUpdateInfo } from './components/UpdateModal';
 import {
   cancelDownloadTask,
+  openSystemDownloadManager,
   restartCleanDownload,
   startHybridDownload,
   triggerSavedBlobDownload,
@@ -58,8 +60,39 @@ const SUPABASE_ANON_KEY =
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
+const APP_VERSION = 'v1.0.0';
+const GITHUB_RELEASES_URL =
+  'https://api.github.com/repos/SEU_USUARIO/SEU_REPOSITORIO/releases/latest';
+
+const APP_VERSION_STORAGE_KEY = 'droidport_installed_version_v1';
 const FAVORITES_STORAGE_KEY = 'droidport_favorites_v1';
 const VIEW_MODE_STORAGE_KEY = 'droidport_view_mode_v1';
+
+function isReleaseNewer(remoteTag: string, currentTag: string): boolean {
+  const cleanRemote = remoteTag.trim().replace(/^v/i, '');
+  const cleanCurrent = currentTag.trim().replace(/^v/i, '');
+  if (!cleanRemote || cleanRemote === cleanCurrent) return false;
+
+  const remoteParts = cleanRemote.split('.').map((n) => parseInt(n, 10));
+  const currentParts = cleanCurrent.split('.').map((n) => parseInt(n, 10));
+
+  const validSemver =
+    remoteParts.every((n) => !Number.isNaN(n)) &&
+    currentParts.every((n) => !Number.isNaN(n));
+
+  if (!validSemver) {
+    return remoteTag.trim() !== currentTag.trim();
+  }
+
+  const len = Math.max(remoteParts.length, currentParts.length);
+  for (let i = 0; i < len; i++) {
+    const r = remoteParts[i] ?? 0;
+    const c = currentParts[i] ?? 0;
+    if (r > c) return true;
+    if (r < c) return false;
+  }
+  return false;
+}
 
 const SORT_LABELS: Record<SortOption, string> = {
   recentes: 'Mais Recentes',
@@ -103,6 +136,76 @@ export default function App() {
   });
 
   const [downloads, setDownloads] = useState<Record<string, DownloadTask>>({});
+
+  const [installedVersion, setInstalledVersion] = useState<string>(() => {
+    try {
+      return localStorage.getItem(APP_VERSION_STORAGE_KEY) || APP_VERSION;
+    } catch {
+      return APP_VERSION;
+    }
+  });
+  const [availableUpdate, setAvailableUpdate] = useState<AppUpdateInfo | null>(
+    null
+  );
+
+  // Check GitHub Releases API for app updates on startup
+  useEffect(() => {
+    let active = true;
+
+    const checkUpdates = async () => {
+      try {
+        const response = await fetch(GITHUB_RELEASES_URL, {
+          headers: { Accept: 'application/vnd.github+json' },
+        });
+        if (!response.ok) return;
+
+        const data = (await response.json()) as {
+          tag_name?: string;
+          body?: string;
+          assets?: Array<{ name?: string; browser_download_url?: string }>;
+        };
+
+        const tagName = data.tag_name?.trim();
+        if (!tagName || !isReleaseNewer(tagName, installedVersion)) {
+          return;
+        }
+
+        const apkAsset = data.assets?.find(
+          (asset) =>
+            typeof asset.browser_download_url === 'string' &&
+            asset.name?.toLowerCase().endsWith('.apk')
+        );
+
+        if (!apkAsset?.browser_download_url || !active) return;
+
+        setAvailableUpdate({
+          tagName,
+          downloadUrl: apkAsset.browser_download_url,
+          releaseNotes: data.body?.trim() || undefined,
+        });
+      } catch {
+        // Silently ignore offline / rate-limit errors during update check
+      }
+    };
+
+    void checkUpdates();
+    return () => {
+      active = false;
+    };
+  }, [installedVersion]);
+
+  const handleUpdateNow = useCallback(() => {
+    if (!availableUpdate) return;
+    try {
+      localStorage.setItem(APP_VERSION_STORAGE_KEY, availableUpdate.tagName);
+    } catch {
+      // Ignore storage errors
+    }
+    const downloadUrl = availableUpdate.downloadUrl;
+    setInstalledVersion(availableUpdate.tagName);
+    setAvailableUpdate(null);
+    openSystemDownloadManager(downloadUrl);
+  }, [availableUpdate]);
 
   // Fetch games from Supabase table `jogos`
   const fetchJogos = useCallback(async () => {
@@ -445,23 +548,32 @@ export default function App() {
   if (selectedGame) {
     const gameId = String(selectedGame.id);
     return (
-      <GameDetailsView
-        jogo={selectedGame}
-        isFavorite={favorites.includes(gameId)}
-        downloads={downloads}
-        onBack={() => setSelectedGame(null)}
-        onToggleFavorite={toggleFavorite}
-        onStartFileDownload={handleStartFileDownload}
-        onDownloadAll={handleDownloadAll}
-        onCancelDownload={handleCancelDownload}
-        onResumeDownload={handleResumeDownload}
-        onRetryDownload={handleRetryDownload}
-        onSaveCompleted={handleSaveCompleted}
-        onGoToProgress={() => {
-          setSelectedGame(null);
-          setActiveTab('progresso');
-        }}
-      />
+      <>
+        <GameDetailsView
+          jogo={selectedGame}
+          isFavorite={favorites.includes(gameId)}
+          downloads={downloads}
+          onBack={() => setSelectedGame(null)}
+          onToggleFavorite={toggleFavorite}
+          onStartFileDownload={handleStartFileDownload}
+          onDownloadAll={handleDownloadAll}
+          onCancelDownload={handleCancelDownload}
+          onResumeDownload={handleResumeDownload}
+          onRetryDownload={handleRetryDownload}
+          onSaveCompleted={handleSaveCompleted}
+          onGoToProgress={() => {
+            setSelectedGame(null);
+            setActiveTab('progresso');
+          }}
+        />
+        {availableUpdate && (
+          <UpdateModal
+            update={availableUpdate}
+            onUpdateNow={handleUpdateNow}
+            onDismiss={() => setAvailableUpdate(null)}
+          />
+        )}
+      </>
     );
   }
 
@@ -866,6 +978,7 @@ export default function App() {
               Configurações
             </h2>
             <SettingsView
+              appVersion={installedVersion}
               favoritesCount={favorites.length}
               downloadsCount={downloadList.length}
               onClearCache={handleClearCache}
@@ -874,6 +987,14 @@ export default function App() {
           </section>
         )}
       </div>
+
+      {availableUpdate && (
+        <UpdateModal
+          update={availableUpdate}
+          onUpdateNow={handleUpdateNow}
+          onDismiss={() => setAvailableUpdate(null)}
+        />
+      )}
 
       {/* 5. Fixed Bottom Navigation Bar */}
       <nav

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { Check, HardDrive, HeartOff, Info, Trash2 } from 'lucide-react';
 
 interface SettingsViewProps {
+  appVersion: string;
   favoritesCount: number;
   downloadsCount: number;
   onClearCache: () => Promise<void>;
@@ -9,6 +10,7 @@ interface SettingsViewProps {
 }
 
 export function SettingsView({
+  appVersion,
   favoritesCount,
   downloadsCount,
   onClearCache,
@@ -113,7 +115,7 @@ export function SettingsView({
             dedicada a ports de jogos para Android.
           </p>
           <div className="pt-1 space-y-1 font-mono-nums">
-            <p>Versão: 1.0.0</p>
+            <p>Versão: {appVersion}</p>
             <p>Motor de Download: Híbrido WebTorrent (P2P + WebSeed) &amp; ReadableStream</p>
             <p>Persistência: localStorage (favoritos) + IndexedDB (retomada de downloads)</p>
           </div>
