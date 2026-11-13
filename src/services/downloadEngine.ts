@@ -22,6 +22,10 @@ const DOWNLOAD_HEADERS: Record<string, string> = {
   'User-Agent': ANDROID_CHROME_USER_AGENT,
 };
 
+const MIN_VALID_FILE_SIZE_BYTES = 500000; // 500 KB
+const INVALID_FILE_ERROR_MESSAGE =
+  'O servidor retornou uma página inválida em vez do arquivo do jogo. Tente novamente.';
+
 interface WebTorrentFile {
   name: string;
   length: number;
@@ -103,10 +107,11 @@ function parseArchiveOrgDownloadUrl(
     if (!parsed.hostname.toLowerCase().includes('archive.org')) {
       return null;
     }
-    if (!parsed.pathname.startsWith('/download/')) {
+    if (!parsed.pathname.includes('/download/')) {
       return null;
     }
-    const remainder = parsed.pathname.replace(/^\/download\//, '');
+    const idx = parsed.pathname.indexOf('/download/');
+    const remainder = parsed.pathname.slice(idx + '/download/'.length);
     const segments = remainder.split('/').filter(Boolean);
     if (segments.length < 2) {
       return null;
@@ -244,8 +249,7 @@ async function startCapacitorNativeDownload(
   });
 
   const nomeLimpoDoPort = sanitizeFolderName(initialTask.titulo);
-  const fallbackBase = sanitizeFolderName(initialTask.arquivoNome || initialTask.titulo);
-  const nomeOriginalDoArquivo = extractFileNameFromUrl(url, fallbackBase);
+  const nomeOriginalDoArquivo = extractFileNameFromUrl(url, nomeLimpoDoPort);
   const folderPath = `Download/${nomeLimpoDoPort}`;
   const targetPath = `${folderPath}/${nomeOriginalDoArquivo}`;
   const displaySavedPath = `Downloads/${nomeLimpoDoPort}/${nomeOriginalDoArquivo}`;
@@ -288,7 +292,17 @@ async function startCapacitorNativeDownload(
       // Directory may already exist
     }
 
-    let activeAttemptUrl = url;
+    // 1. Resolve real direct mirror URL BEFORE starting Filesystem.downloadFile for archive.org/download/ links
+    const candidateUrls: string[] = [];
+    if (url.includes('archive.org/download/')) {
+      const resolvedMirrors = await resolveArchiveOrgDirectUrls(url);
+      candidateUrls.push(...resolvedMirrors);
+    }
+    if (!candidateUrls.includes(url)) {
+      candidateUrls.push(url);
+    }
+
+    let activeAttemptUrl = candidateUrls[0];
     let lastBytes = 0;
     let lastTime = performance.now();
 
@@ -333,43 +347,54 @@ async function startCapacitorNativeDownload(
       void saveDownloadTask(updated);
     });
 
-    const downloadWithHeaders = async (targetUrl: string) => {
+    let lastError: unknown = null;
+    let downloadedSuccessfully = false;
+    let verifiedSize = fallbackTotalBytes;
+
+    for (const targetUrl of candidateUrls) {
+      if (cancelled) break;
+
       activeAttemptUrl = targetUrl;
       lastBytes = 0;
       lastTime = performance.now();
-      return Filesystem.downloadFile({
-        url: targetUrl,
-        path: targetPath,
-        directory: Directory.ExternalStorage,
-        progress: true,
-        headers: DOWNLOAD_HEADERS,
-        connectTimeout: 30000,
-        readTimeout: 90000,
-      });
-    };
 
-    let lastError: unknown = null;
-    let downloadedSuccessfully = false;
+      try {
+        await Filesystem.downloadFile({
+          url: targetUrl,
+          path: targetPath,
+          directory: Directory.ExternalStorage,
+          progress: true,
+          headers: DOWNLOAD_HEADERS,
+          connectTimeout: 30000,
+          readTimeout: 90000,
+        });
 
-    try {
-      await downloadWithHeaders(url);
-      downloadedSuccessfully = true;
-    } catch (primaryErr) {
-      lastError = primaryErr;
+        if (cancelled) break;
 
-      // If archive.org timed out or refused initial URL, resolve direct mirror URLs via Metadata API
-      if (!cancelled && parseArchiveOrgDownloadUrl(url)) {
-        const mirrors = await resolveArchiveOrgDirectUrls(url);
-        for (const mirrorUrl of mirrors) {
-          if (cancelled) break;
+        // 2. Verify downloaded file size via Filesystem.stat (< 500 KB indicates invalid HTML page)
+        const statResult = await Filesystem.stat({
+          path: targetPath,
+          directory: Directory.ExternalStorage,
+        });
+
+        if (statResult.size < MIN_VALID_FILE_SIZE_BYTES) {
           try {
-            await downloadWithHeaders(mirrorUrl);
-            downloadedSuccessfully = true;
-            break;
-          } catch (mirrorErr) {
-            lastError = mirrorErr;
+            await Filesystem.deleteFile({
+              path: targetPath,
+              directory: Directory.ExternalStorage,
+            });
+          } catch {
+            // Ignore deletion error
           }
+          lastError = new Error(INVALID_FILE_ERROR_MESSAGE);
+          continue;
         }
+
+        verifiedSize = statResult.size;
+        downloadedSuccessfully = true;
+        break;
+      } catch (attemptErr) {
+        lastError = attemptErr;
       }
     }
 
@@ -389,15 +414,15 @@ async function startCapacitorNativeDownload(
     }
 
     if (!downloadedSuccessfully) {
-      throw lastError || new Error('Tempo limite ou erro ao conectar ao servidor.');
+      throw lastError || new Error(INVALID_FILE_ERROR_MESSAGE);
     }
 
     const completedTask: DownloadTask = {
       ...startingTask,
       status: 'completed',
       mode: 'capacitor-native',
-      downloadedBytes: fallbackTotalBytes,
-      totalBytes: fallbackTotalBytes,
+      downloadedBytes: verifiedSize,
+      totalBytes: verifiedSize,
       progress: 100,
       speedBytesPerSec: 0,
       peers: 0,
@@ -416,7 +441,7 @@ async function startCapacitorNativeDownload(
     const message =
       err instanceof Error
         ? err.message
-        : 'Falha ou timeout ao baixar do servidor. Tente novamente ou use o Gerenciador do Sistema.';
+        : INVALID_FILE_ERROR_MESSAGE;
 
     const erroredTask: DownloadTask = {
       ...startingTask,
@@ -478,33 +503,39 @@ async function startFetchStreamDownload(
       });
     };
 
-    let response: Response;
-    try {
-      response = await makeFetchRequest(url);
-    } catch (firstErr) {
-      if (parseArchiveOrgDownloadUrl(url) && !isCancelled()) {
-        const mirrors = await resolveArchiveOrgDirectUrls(url);
-        let mirrorResponse: Response | null = null;
-        for (const mirrorUrl of mirrors) {
-          try {
-            const candidate = await makeFetchRequest(mirrorUrl);
-            if (candidate.ok || candidate.status === 206) {
-              mirrorResponse = candidate;
-              break;
-            }
-          } catch {
-            // Try next mirror
-          }
+    const candidateUrls: string[] = [];
+    if (url.includes('archive.org/download/')) {
+      const mirrors = await resolveArchiveOrgDirectUrls(url);
+      candidateUrls.push(...mirrors);
+    }
+    if (!candidateUrls.includes(url)) {
+      candidateUrls.push(url);
+    }
+
+    let response: Response | null = null;
+    let lastFetchErr: unknown = null;
+
+    for (const candidateUrl of candidateUrls) {
+      if (isCancelled()) return;
+      try {
+        const res = await makeFetchRequest(candidateUrl);
+        const contentType = (res.headers.get('content-type') || '').toLowerCase();
+        if (contentType.includes('text/html')) {
+          lastFetchErr = new Error(INVALID_FILE_ERROR_MESSAGE);
+          continue;
         }
-        if (!mirrorResponse) throw firstErr;
-        response = mirrorResponse;
-      } else {
-        throw firstErr;
+        if (res.ok || res.status === 206) {
+          response = res;
+          break;
+        }
+        lastFetchErr = new Error(`HTTP ${res.status} ao baixar arquivo.`);
+      } catch (err) {
+        lastFetchErr = err;
       }
     }
 
-    if (!response.ok && response.status !== 206) {
-      throw new Error(`HTTP ${response.status} ao baixar arquivo.`);
+    if (!response) {
+      throw lastFetchErr || new Error('Falha ao conectar ao servidor de download.');
     }
 
     if (existingBytes > 0 && response.status === 200) {
@@ -618,6 +649,11 @@ async function startFetchStreamDownload(
     }
 
     if (isCancelled()) return;
+
+    if (downloadedBytes < MIN_VALID_FILE_SIZE_BYTES) {
+      await clearDownloadChunksOnly(initialTask.taskId);
+      throw new Error(INVALID_FILE_ERROR_MESSAGE);
+    }
 
     await flushPendingChunks();
 

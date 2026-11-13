@@ -60,7 +60,7 @@ const SUPABASE_ANON_KEY =
 
 const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-export const APP_VERSION = 'v1.0.0';
+export const APP_VERSION = 'v1.0.1';
 const GITHUB_RELEASES_URL =
   'https://api.github.com/repos/SEU_USUARIO/SEU_REPOSITORIO/releases/latest';
 
@@ -281,7 +281,7 @@ export default function App() {
     (jogo: Jogo, arquivo: JogoArquivo, index: number): DownloadTask => {
       const gameId = String(jogo.id);
       const taskId = buildDownloadTaskId(gameId, arquivo, index);
-      const fallbackBase = sanitizeFolderName(arquivo.nome || jogo.titulo);
+      const fallbackBase = sanitizeFolderName(jogo.titulo);
       const fileName = extractFileNameFromUrl(
         arquivo.url || arquivo.torrent_url,
         fallbackBase

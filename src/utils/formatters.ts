@@ -113,15 +113,24 @@ export function extractFileNameFromUrl(
       const lastSegment = parsed.pathname.split('/').filter(Boolean).pop();
       if (lastSegment) {
         const decoded = decodeURIComponent(lastSegment).trim();
-        if (/^[^/\\]+\.[a-zA-Z0-9]{2,6}$/.test(decoded)) {
+        if (/^[^/\\]+\.[a-zA-Z0-9]{1,8}$/.test(decoded)) {
           return decoded.replace(/[<>:"/\\|?*]+/g, '_');
         }
       }
     } catch {
       const cleanPath = url.split('?')[0].split('#')[0];
       const lastSegment = cleanPath.split('/').filter(Boolean).pop();
-      if (lastSegment && /^[^/\\]+\.[a-zA-Z0-9]{2,6}$/.test(lastSegment)) {
-        return lastSegment.replace(/[<>:"/\\|?*]+/g, '_');
+      if (lastSegment) {
+        const decoded = (() => {
+          try {
+            return decodeURIComponent(lastSegment).trim();
+          } catch {
+            return lastSegment.trim();
+          }
+        })();
+        if (/^[^/\\]+\.[a-zA-Z0-9]{1,8}$/.test(decoded)) {
+          return decoded.replace(/[<>:"/\\|?*]+/g, '_');
+        }
       }
     }
   }
