@@ -15,6 +15,7 @@ import {
   X,
   Zap,
 } from 'lucide-react';
+import { usePreferences } from '../context/PreferencesContext';
 import type { DownloadTask, Jogo, JogoArquivo } from '../types/game';
 import {
   buildDownloadTaskId,
@@ -55,6 +56,7 @@ export function GameDetailsView({
   onDownloadAll,
   onRetryDownload,
 }: GameDetailsViewProps) {
+  const { t } = usePreferences();
   const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const gameId = String(jogo.id);
@@ -90,33 +92,39 @@ export function GameDetailsView({
   };
 
   return (
-    <div className="min-h-screen bg-[#0F0E13] text-white pb-28">
+    <div className="min-h-screen bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#140C24] text-[#111827] dark:text-white pb-28">
       {/* Top sticky header */}
-      <header className="sticky top-0 z-30 bg-[#0F0E13]/85 backdrop-blur-md border-b border-[#2A2738]">
+      <header className="sticky top-0 z-30 bg-white/85 dark:bg-[#0F0E13]/85 purple:bg-[#140C24]/85 backdrop-blur-md border-b border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466]">
         <div className="max-w-5xl mx-auto px-4 h-14 flex items-center justify-between gap-3">
           <button
             type="button"
             onClick={onBack}
-            className="min-h-[44px] min-w-[44px] -ml-2 px-2 inline-flex items-center gap-2 rounded-xl text-white hover:bg-[#1B1924] transition-colors"
-            aria-label="Voltar ao catálogo"
+            className="min-h-[44px] min-w-[44px] -ml-2 px-2 inline-flex items-center gap-2 rounded-xl text-[#111827] dark:text-white hover:bg-[#F4F5F9] dark:hover:bg-[#1B1924] purple:hover:bg-[#20143A] transition-colors"
+            aria-label={t.details.back}
           >
             <ArrowLeft className="w-5 h-5" />
-            <span className="text-sm font-medium whitespace-nowrap">Voltar</span>
+            <span className="text-sm font-medium whitespace-nowrap">
+              {t.details.back}
+            </span>
           </button>
 
-          <h2 className="text-sm font-semibold text-[#9CA3AF] truncate">
+          <h2 className="text-sm font-semibold text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] truncate">
             {jogo.titulo}
           </h2>
 
           <button
             type="button"
             onClick={() => onToggleFavorite(gameId)}
-            aria-label={isFavorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'}
-            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 transition-colors"
+            aria-label={
+              isFavorite ? 'Remover dos favoritos' : 'Adicionar aos favoritos'
+            }
+            className="min-h-[44px] min-w-[44px] flex items-center justify-center rounded-xl bg-[#F4F5F9] dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 transition-colors"
           >
             <Heart
               className={`w-5 h-5 ${
-                isFavorite ? 'fill-rose-500 text-rose-500' : 'text-white/85'
+                isFavorite
+                  ? 'fill-rose-500 text-rose-500'
+                  : 'text-[#525866] dark:text-white/85 purple:text-[#DDD6FE]'
               }`}
             />
           </button>
@@ -125,58 +133,62 @@ export function GameDetailsView({
 
       <main className="max-w-5xl mx-auto px-4 pt-4 space-y-6">
         {/* Hero Cover & Core Info */}
-        <section className="rounded-3xl overflow-hidden bg-[#1B1924] border border-[#2A2738]">
-          <div className="relative h-56 sm:h-72 w-full bg-[#14121B]">
+        <section className="rounded-3xl overflow-hidden bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466]">
+          <div className="relative h-56 sm:h-72 w-full bg-[#E8EAF2] dark:bg-[#14121B] purple:bg-[#170E2B]">
             <GameCover src={jogo.capa_url} alt={jogo.titulo} className="w-full h-full" />
-            <div className="absolute inset-0 bg-gradient-to-t from-[#1B1924] via-[#1B1924]/45 to-transparent" />
+            <div className="absolute inset-0 bg-gradient-to-t from-black/45 via-transparent to-transparent pointer-events-none" />
             {jogo.destaque && (
               <span className="absolute top-4 left-4 inline-flex items-center px-2.5 py-1 rounded-md bg-amber-400 text-[#0F0E13] text-xs font-bold tracking-wide">
-                ★ DESTAQUE
+                {t.catalog.featuredBadge}
               </span>
             )}
           </div>
 
-          <div className="p-5 sm:p-6 -mt-8 relative z-10 space-y-5">
+          <div className="p-5 sm:p-6 -mt-6 rounded-t-3xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] relative z-10 space-y-5">
             <div className="space-y-1.5">
-              <h1 className="text-2xl sm:text-3xl font-extrabold text-white tracking-tight text-balance">
+              <h1 className="text-2xl sm:text-3xl font-extrabold text-[#111827] dark:text-white tracking-tight text-balance">
                 {jogo.titulo}
               </h1>
-              <p className="text-sm font-medium text-[#8B5CF6]">{categoriesDot}</p>
-              <p className="text-sm text-[#9CA3AF] font-mono-nums">
+              <p className="text-sm font-medium text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC]">
+                {categoriesDot}
+              </p>
+              <p className="text-sm text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] font-mono-nums">
                 {jogo.versao} • {jogo.tamanho}
               </p>
             </div>
 
             {/* Sobre o Port */}
-            <div className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-4 space-y-2">
-              <h2 className="text-sm font-bold text-white">Sobre o Port</h2>
-              <p className="text-sm text-[#D1D5DB] leading-relaxed whitespace-pre-line">
-                {jogo.descricao || 'Nenhuma descrição informada para este port.'}
+            <div className="rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-4 space-y-2">
+              <h2 className="text-sm font-bold text-[#111827] dark:text-white">
+                {t.details.aboutPort}
+              </h2>
+              <p className="text-sm text-[#374151] dark:text-[#D1D5DB] purple:text-[#DDD6FE] leading-relaxed whitespace-pre-line">
+                {jogo.descricao || t.details.noDescription}
               </p>
             </div>
 
             {/* Arquivos Disponíveis */}
             <div className="space-y-3 pt-1">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-sm font-bold text-white">
-                  Arquivos Disponíveis ({files.length})
+                <h2 className="text-sm font-bold text-[#111827] dark:text-white">
+                  {t.details.availableFiles} ({files.length})
                 </h2>
 
                 {files.length > 1 && (
                   <button
                     type="button"
                     onClick={() => onDownloadAll(jogo, files)}
-                    className="min-h-[44px] px-4 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] text-white text-xs sm:text-sm font-bold inline-flex items-center gap-2 shadow-md shadow-[#6366F1]/25 active:scale-[0.98] transition-all shrink-0"
+                    className="min-h-[44px] px-4 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] purple:from-[#7E22CE] purple:to-[#C026D3] purple:hover:from-[#6B21A8] purple:hover:to-[#A21CAF] text-white text-xs sm:text-sm font-bold inline-flex items-center gap-2 shadow-md shadow-[#6366F1]/25 purple:shadow-[#9333EA]/30 active:scale-[0.98] transition-all shrink-0"
                   >
                     <Download className="w-4 h-4" />
-                    <span>Baixar Todos</span>
+                    <span>{t.details.downloadAll}</span>
                   </button>
                 )}
               </div>
 
               {files.length === 0 ? (
-                <div className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-4 text-xs text-[#9CA3AF]">
-                  Nenhum arquivo disponível para download neste port.
+                <div className="rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-4 text-xs text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+                  {t.details.noFiles}
                 </div>
               ) : (
                 <div className="space-y-2.5">
@@ -203,17 +215,17 @@ export function GameDetailsView({
                     return (
                       <div
                         key={taskId}
-                        className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-3.5 space-y-3"
+                        className="rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-3.5 space-y-3"
                       >
                         <div className="flex items-center gap-3 min-w-0">
-                          <div className="w-10 h-10 rounded-xl bg-[#1B1924] border border-[#2A2738] flex items-center justify-center text-[#8B5CF6] shrink-0">
+                          <div className="w-10 h-10 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] flex items-center justify-center text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0">
                             <FileArchive className="w-5 h-5" />
                           </div>
                           <div className="min-w-0 flex-1">
-                            <p className="text-sm font-bold text-white truncate">
+                            <p className="text-sm font-bold text-[#111827] dark:text-white truncate">
                               {arquivo.nome}
                             </p>
-                            <p className="text-xs text-[#9CA3AF] font-mono-nums">
+                            <p className="text-xs text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] font-mono-nums">
                               {arquivo.tamanho || jogo.tamanho || 'Tamanho variável'}
                             </p>
                           </div>
@@ -229,17 +241,17 @@ export function GameDetailsView({
                                   ? onRetryDownload(directTask)
                                   : onStartFileDownload(jogo, arquivo, index)
                               }
-                              className="flex-1 min-w-[130px] min-h-[44px] px-3.5 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
+                              className="flex-1 min-w-[130px] min-h-[44px] px-3.5 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 text-[#111827] dark:text-white text-xs sm:text-sm font-semibold inline-flex items-center justify-center gap-1.5 transition-colors"
                             >
                               {isDirectRedirected ? (
                                 <>
                                   <RotateCcw className="w-3.5 h-3.5 shrink-0" />
-                                  <span>Baixar novamente</span>
+                                  <span>{t.details.downloadAgain}</span>
                                 </>
                               ) : (
                                 <>
                                   <Download className="w-4 h-4 shrink-0" />
-                                  <span>Download Direto</span>
+                                  <span>{t.details.downloadDirect}</span>
                                 </>
                               )}
                             </button>
@@ -254,17 +266,17 @@ export function GameDetailsView({
                                     ? onRetryDownload(p2pTask)
                                     : onStartP2PDownload(jogo, arquivo, index)
                                 }
-                                className="flex-1 min-w-[125px] min-h-[44px] px-3.5 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 shadow-md shadow-[#6366F1]/25 active:scale-[0.98] transition-all"
+                                className="flex-1 min-w-[125px] min-h-[44px] px-3.5 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] purple:from-[#7E22CE] purple:to-[#C026D3] purple:hover:from-[#6B21A8] purple:hover:to-[#A21CAF] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 shadow-md shadow-[#6366F1]/25 purple:shadow-[#9333EA]/30 active:scale-[0.98] transition-all"
                               >
                                 {isP2PRedirected ? (
                                   <>
                                     <RotateCcw className="w-4 h-4 shrink-0" />
-                                    <span>Baixar novamente</span>
+                                    <span>{t.details.downloadAgain}</span>
                                   </>
                                 ) : (
                                   <>
                                     <Zap className="w-4 h-4 shrink-0" />
-                                    <span>Baixar P2P</span>
+                                    <span>{t.details.downloadP2P}</span>
                                   </>
                                 )}
                               </button>
@@ -272,19 +284,19 @@ export function GameDetailsView({
                               <button
                                 type="button"
                                 onClick={() => copyToClipboard(fileTorrentUrl, taskId)}
-                                aria-label={`Copiar link P2P de ${arquivo.nome}`}
-                                title="Copiar link P2P"
-                                className="min-h-[44px] min-w-[44px] px-3 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors shrink-0"
+                                aria-label={`${t.details.copyP2P} (${arquivo.nome})`}
+                                title={t.details.copyP2P}
+                                className="min-h-[44px] min-w-[44px] px-3 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 text-[#111827] dark:text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors shrink-0"
                               >
                                 {copiedKey === taskId ? (
                                   <>
-                                    <Check className="w-4 h-4 text-emerald-400 shrink-0" />
-                                    <span className="text-emerald-400 hidden sm:inline">
-                                      Copiado
+                                    <Check className="w-4 h-4 text-emerald-500 shrink-0" />
+                                    <span className="text-emerald-600 dark:text-emerald-400 hidden sm:inline">
+                                      {t.details.copied}
                                     </span>
                                   </>
                                 ) : (
-                                  <Copy className="w-4 h-4 text-[#8B5CF6] shrink-0" />
+                                  <Copy className="w-4 h-4 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0" />
                                 )}
                               </button>
                             </>
@@ -292,16 +304,14 @@ export function GameDetailsView({
                         </div>
 
                         {isAnyRedirected && (
-                          <div className="flex items-center gap-1.5 text-xs text-emerald-400/90 pt-0.5">
+                          <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400/90 pt-0.5">
                             <CheckCircle2 className="w-3.5 h-3.5 shrink-0" />
-                            <span>
-                              Redirecionado para o gerenciador de downloads do dispositivo
-                            </span>
+                            <span>{t.details.redirectedNotice}</span>
                           </div>
                         )}
 
                         {!isAnyRedirected && isDirectError && directTask?.errorMessage && (
-                          <p className="text-xs text-rose-400 pt-0.5">
+                          <p className="text-xs text-rose-500 dark:text-rose-400 pt-0.5">
                             {directTask.errorMessage}
                           </p>
                         )}
@@ -312,10 +322,10 @@ export function GameDetailsView({
               )}
 
               {hasAnyTorrent && (
-                <div className="rounded-xl bg-[#0F0E13]/85 border border-[#2A2738] px-3.5 py-2.5 flex items-start gap-2.5">
-                  <Info className="w-4 h-4 text-[#8B5CF6] shrink-0 mt-0.5" />
-                  <p className="text-xs text-[#9CA3AF] leading-relaxed">
-                    Dica para velocidade máxima: Para jogos pesados (acima de 2 GB), recomendamos usar o app gratuito LibreTorrent no botão P2P acima. Ele permite pausar o download e baixa em velocidade máxima.
+                <div className="rounded-xl bg-[#F4F5F9] dark:bg-[#0F0E13]/85 purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] px-3.5 py-2.5 flex items-start gap-2.5">
+                  <Info className="w-4 h-4 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0 mt-0.5" />
+                  <p className="text-xs text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] leading-relaxed">
+                    {t.details.maxSpeedTipTitle} {t.details.maxSpeedTipBody}
                   </p>
                 </div>
               )}
@@ -327,8 +337,10 @@ export function GameDetailsView({
         {tutorials.length > 0 && (
           <section className="space-y-3">
             <div className="flex items-center gap-2">
-              <PlayCircle className="w-5 h-5 text-[#8B5CF6] shrink-0" />
-              <h2 className="text-base font-bold text-white">Vídeos Tutoriais</h2>
+              <PlayCircle className="w-5 h-5 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0" />
+              <h2 className="text-base font-bold text-[#111827] dark:text-white">
+                {t.details.tutorialVideos}
+              </h2>
             </div>
 
             <div className="space-y-3">
@@ -339,13 +351,13 @@ export function GameDetailsView({
                 return (
                   <div
                     key={`${tutorial.url}-${idx}`}
-                    className="rounded-2xl bg-[#1B1924] border border-[#2A2738] p-4 space-y-3"
+                    className="rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-4 space-y-3"
                   >
-                    <h3 className="text-sm sm:text-base font-bold text-white leading-snug">
+                    <h3 className="text-sm sm:text-base font-bold text-[#111827] dark:text-white leading-snug">
                       {tutorial.titulo}
                     </h3>
 
-                    <div className="rounded-xl overflow-hidden bg-[#0F0E13] border border-[#2A2738] aspect-video">
+                    <div className="rounded-xl overflow-hidden bg-black border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] aspect-video">
                       {parsedTutorialVideo.type === 'youtube' ? (
                         <iframe
                           src={parsedTutorialVideo.src}
@@ -374,8 +386,10 @@ export function GameDetailsView({
         {/* Video Player */}
         {video && (
           <section className="space-y-3">
-            <h2 className="text-base font-bold text-white">Vídeo</h2>
-            <div className="rounded-2xl overflow-hidden bg-[#1B1924] border border-[#2A2738] aspect-video">
+            <h2 className="text-base font-bold text-[#111827] dark:text-white">
+              {t.details.video}
+            </h2>
+            <div className="rounded-2xl overflow-hidden bg-black border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] aspect-video">
               {video.type === 'youtube' ? (
                 <iframe
                   src={video.src}
@@ -400,8 +414,8 @@ export function GameDetailsView({
         {/* Screenshots Gallery */}
         {photos.length > 0 && (
           <section className="space-y-3">
-            <h2 className="text-base font-bold text-white">
-              Galeria de Fotos ({photos.length})
+            <h2 className="text-base font-bold text-[#111827] dark:text-white">
+              {t.details.photoGallery} ({photos.length})
             </h2>
             <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1 -mx-4 px-4">
               {photos.map((photoUrl, idx) => (
@@ -409,7 +423,7 @@ export function GameDetailsView({
                   key={`${photoUrl}-${idx}`}
                   type="button"
                   onClick={() => setFullscreenIndex(idx)}
-                  className="shrink-0 w-64 sm:w-72 aspect-video rounded-2xl overflow-hidden bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/60 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6366F1]"
+                  className="shrink-0 w-64 sm:w-72 aspect-video rounded-2xl overflow-hidden bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-[#6366F1]/60 purple:hover:border-[#A855F7]/70 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6366F1] purple:focus-visible:ring-[#A855F7]"
                 >
                   <img
                     src={photoUrl}

@@ -13,8 +13,19 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,400..700;1,9..40,400..700&family=JetBrains+Mono:wght@400;500;600&family=Plus+Jakarta+Sans:wght@500;600;700;800&display=swap" rel="stylesheet" />
+    <script>
+      (function () {
+        try {
+          var t = localStorage.getItem('droidport_theme_v1') || 'dark';
+          var isPurple = t === 'purple';
+          var isDark = isPurple || t === 'dark' || (t === 'system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
+          document.documentElement.classList.toggle('dark', isDark);
+          document.documentElement.classList.toggle('purple', isPurple);
+        } catch (e) {}
+      })();
+    </script>
   </head>
-  <body class="bg-[#0F0E13] text-white antialiased selection:bg-[#6366F1]/30 selection:text-white">
+  <body class="antialiased selection:bg-[#6366F1]/30">
     <div id="root"></div>
     <script type="module" src="/src/main.tsx"></script>
   </body>

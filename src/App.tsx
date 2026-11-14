@@ -28,6 +28,7 @@ import { GameDetailsView } from './components/GameDetailsView';
 import { ProgressView } from './components/ProgressView';
 import { SettingsView } from './components/SettingsView';
 import { UpdateModal, type AppUpdateInfo } from './components/UpdateModal';
+import { usePreferences } from './context/PreferencesContext';
 import {
   communitySupabase,
   handleOAuthCallbackUrl,
@@ -62,8 +63,10 @@ import {
   parseSizeToBytes,
   sanitizeFolderName,
 } from './utils/formatters';
+import { APP_VERSION } from './version';
 
-export const VERSAO_APP = '1.0.16';
+export { APP_VERSION };
+export const VERSAO_APP = APP_VERSION;
 
 function isValidHttpUrl(value: unknown): value is string {
   if (typeof value !== 'string') return false;
@@ -117,13 +120,15 @@ const FAVORITES_STORAGE_KEY = 'droidport_favorites_v1';
 const VIEW_MODE_STORAGE_KEY = 'droidport_view_mode_v1';
 const INSTALLED_VERSION_STORAGE_KEY = 'droidport_installed_version_v1';
 
-const SORT_LABELS: Record<SortOption, string> = {
-  recentes: 'Mais Recentes',
-  nome: 'Nome (A-Z)',
-  tamanho: 'Tamanho',
-};
-
 export default function App() {
+  const { t, autoCheckUpdates } = usePreferences();
+
+  const sortLabels: Record<SortOption, string> = {
+    recentes: t.catalog.sortRecent,
+    nome: t.catalog.sortName,
+    tamanho: t.catalog.sortSize,
+  };
+
   const [jogos, setJogos] = useState<Jogo[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
@@ -271,67 +276,87 @@ export default function App() {
     }
   }, [communityLoggedIn, jogos]);
 
-  // Check Supabase `config` table for app updates on startup
-  useEffect(() => {
-    let active = true;
-
-    const checkUpdates = async () => {
+  const checkForUpdatesNow = useCallback(
+    async (
+      showPromptIfAvailable = true
+    ): Promise<'up-to-date' | 'update-available' | 'error'> => {
       try {
         const { data, error: configError } = await supabase
           .from('config')
-          .select('versao_atual, link_apk')
+          .select('*')
           .limit(1);
 
-        if (configError || !data || data.length === 0) return;
+        if (configError) return 'error';
+        if (!data || data.length === 0) return 'up-to-date';
 
         const row = data[0] as {
+          id?: string | number | null;
           versao_atual?: string | number | null;
           link_apk?: string | null;
         };
 
+        const rawRemoteVersion = row.versao_atual;
         const versaoAtual =
-          typeof row.versao_atual === 'string'
-            ? row.versao_atual.trim()
-            : row.versao_atual !== null && row.versao_atual !== undefined
-            ? String(row.versao_atual).trim()
+          typeof rawRemoteVersion === 'string'
+            ? rawRemoteVersion.trim()
+            : rawRemoteVersion !== null && rawRemoteVersion !== undefined
+            ? String(rawRemoteVersion).trim()
             : '';
-        if (!isValidHttpUrl(row.link_apk)) {
-          return;
-        }
 
-        let effectiveVersion = VERSAO_APP;
-        try {
-          const savedVersion = localStorage.getItem(INSTALLED_VERSION_STORAGE_KEY);
-          if (savedVersion && isRemoteVersionGreater(savedVersion, effectiveVersion)) {
-            effectiveVersion = savedVersion.trim();
+        // Se a APP_VERSION do aplicativo instalado for MAIOR que a versão salva no Supabase,
+        // sincroniza automaticamente a tabela `config` para igualar à APP_VERSION atual.
+        if (!versaoAtual || isRemoteVersionGreater(APP_VERSION, versaoAtual)) {
+          try {
+            const updateBuilder = supabase
+              .from('config')
+              .update({ versao_atual: APP_VERSION });
+
+            if (row.id !== undefined && row.id !== null) {
+              await updateBuilder.eq('id', row.id);
+            } else if (rawRemoteVersion !== undefined && rawRemoteVersion !== null) {
+              await updateBuilder.eq('versao_atual', rawRemoteVersion);
+            } else if (typeof row.link_apk === 'string' && row.link_apk) {
+              await updateBuilder.eq('link_apk', row.link_apk);
+            }
+          } catch {
+            // Ignora silenciosamente caso RLS bloqueie escrita anônima
           }
-        } catch {
-          // Ignore storage read errors
+
+          try {
+            localStorage.setItem(INSTALLED_VERSION_STORAGE_KEY, APP_VERSION);
+          } catch {
+            // Ignore storage errors
+          }
+
+          return 'up-to-date';
         }
 
-        const linkApk = row.link_apk.trim();
+        // Se a versão no Supabase for MAIOR que a APP_VERSION instalada, mostra o modal de atualização.
         if (
-          !versaoAtual ||
-          !isRemoteVersionGreater(versaoAtual, effectiveVersion) ||
-          !active
+          isRemoteVersionGreater(versaoAtual, APP_VERSION) &&
+          isValidHttpUrl(row.link_apk)
         ) {
-          return;
+          if (showPromptIfAvailable) {
+            setAvailableUpdate({
+              versaoAtual,
+              linkApk: row.link_apk.trim(),
+            });
+          }
+          return 'update-available';
         }
 
-        setAvailableUpdate({
-          versaoAtual,
-          linkApk,
-        });
+        return 'up-to-date';
       } catch {
-        // Silently ignore offline / query errors during update check
+        return 'error';
       }
-    };
+    },
+    []
+  );
 
-    void checkUpdates();
-    return () => {
-      active = false;
-    };
-  }, []);
+  // Sincroniza versão no Supabase ao iniciar e verifica se há atualização disponível
+  useEffect(() => {
+    void checkForUpdatesNow(autoCheckUpdates);
+  }, [autoCheckUpdates, checkForUpdatesNow]);
 
   const handleUpdateNow = useCallback(async () => {
     if (!availableUpdate) return;
@@ -772,7 +797,7 @@ export default function App() {
           {Array.from({ length: 6 }).map((_, idx) => (
             <div
               key={idx}
-              className="h-28 rounded-2xl bg-[#1B1924] border border-[#2A2738] animate-pulse"
+              className="h-28 rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] animate-pulse"
             />
           ))}
         </div>
@@ -781,15 +806,15 @@ export default function App() {
 
     if (error) {
       return (
-        <div className="rounded-2xl bg-[#1B1924] border border-[#2A2738] p-6 text-center space-y-3">
-          <p className="text-sm text-rose-400">{error}</p>
+        <div className="rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-6 text-center space-y-3">
+          <p className="text-sm text-rose-500 dark:text-rose-400">{error}</p>
           <button
             type="button"
             onClick={() => void fetchJogos()}
-            className="min-h-[44px] px-5 rounded-xl bg-[#6366F1] hover:bg-[#5558E6] text-white text-sm font-semibold inline-flex items-center gap-2 transition-colors"
+            className="min-h-[44px] px-5 rounded-xl bg-[#6366F1] hover:bg-[#5558E6] purple:bg-[#9333EA] purple:hover:bg-[#7E22CE] text-white text-sm font-semibold inline-flex items-center gap-2 transition-colors"
           >
             <RefreshCw className="w-4 h-4" />
-            <span>Recarregar catálogo</span>
+            <span>{t.catalog.reloadCatalog}</span>
           </button>
         </div>
       );
@@ -797,9 +822,11 @@ export default function App() {
 
     if (items.length === 0) {
       return (
-        <div className="rounded-2xl bg-[#1B1924] border border-[#2A2738] p-8 text-center space-y-2">
-          <Gamepad2 className="w-8 h-8 text-[#6366F1]/70 mx-auto" />
-          <p className="text-sm font-medium text-white">{emptyMessage}</p>
+        <div className="rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-8 text-center space-y-2">
+          <Gamepad2 className="w-8 h-8 text-[#6366F1]/70 purple:text-[#C084FC]/80 mx-auto" />
+          <p className="text-sm font-medium text-[#111827] dark:text-white">
+            {emptyMessage}
+          </p>
           {(searchQuery || selectedCategory !== 'Todas') && (
             <button
               type="button"
@@ -807,9 +834,9 @@ export default function App() {
                 setSearchQuery('');
                 setSelectedCategory('Todas');
               }}
-              className="mt-2 min-h-[44px] px-4 rounded-xl bg-[#0F0E13] border border-[#2A2738] text-xs font-semibold text-[#8B5CF6] hover:border-[#6366F1]/50 transition-colors"
+              className="mt-2 min-h-[44px] px-4 rounded-xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs font-semibold text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 transition-colors"
             >
-              Limpar filtros
+              {t.catalog.clearFilters}
             </button>
           )}
         </div>
@@ -851,21 +878,21 @@ export default function App() {
     <div className="space-y-4">
       {/* 1. Top Search Bar */}
       <div className="relative">
-        <Search className="w-5 h-5 text-[#9CA3AF] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <Search className="w-5 h-5 text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
         <input
           type="search"
           value={searchQuery}
           onChange={(e) => setSearchQuery(e.target.value)}
-          placeholder="Pesquisar jogos..."
-          aria-label="Pesquisar jogos"
-          className="w-full h-12 pl-12 pr-11 rounded-2xl bg-[#1B1924] border border-[#2A2738] text-sm text-white placeholder-[#9CA3AF] focus:outline-none focus:border-[#6366F1] transition-colors"
+          placeholder={t.catalog.searchPlaceholder}
+          aria-label={t.catalog.searchPlaceholder}
+          className="w-full h-12 pl-12 pr-11 rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-sm text-[#111827] dark:text-white placeholder-[#525866] dark:placeholder-[#9CA3AF] purple:placeholder-[#C4B5FD]/75 focus:outline-none focus:border-[#6366F1] purple:focus:border-[#C084FC] transition-colors"
         />
         {searchQuery && (
           <button
             type="button"
             onClick={() => setSearchQuery('')}
             aria-label="Limpar busca"
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-[#9CA3AF] hover:text-white"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white"
           >
             <X className="w-4 h-4" />
           </button>
@@ -876,7 +903,9 @@ export default function App() {
 
   const renderFiltersSection = () => (
     <section ref={filterBarRef} className="space-y-2.5">
-      <h2 className="text-base font-bold text-white">Filtros</h2>
+      <h2 className="text-base font-bold text-[#111827] dark:text-white">
+        {t.catalog.filters}
+      </h2>
       <div className="flex items-center gap-2.5 relative">
         {/* Categorias Dropdown */}
         <div className="relative flex-1 sm:flex-initial">
@@ -890,29 +919,31 @@ export default function App() {
             aria-expanded={openDropdown === 'categoria'}
             className={`w-full sm:w-auto min-h-[44px] px-4 rounded-2xl border text-xs sm:text-sm font-medium flex items-center justify-between gap-2 transition-colors ${
               selectedCategory !== 'Todas'
-                ? 'bg-[#6366F1]/15 border-[#6366F1]/60 text-white'
-                : 'bg-[#1B1924] border-[#2A2738] text-white hover:border-[#6366F1]/40'
+                ? 'bg-[#6366F1]/12 dark:bg-[#6366F1]/15 purple:bg-[#9333EA]/25 border-[#6366F1]/60 purple:border-[#C084FC] text-[#4F46E5] dark:text-white'
+                : 'bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[#111827] dark:text-white hover:border-[#6366F1]/40 purple:hover:border-[#A855F7]/60'
             }`}
           >
             <span className="inline-flex items-center gap-2 truncate">
-              <SlidersHorizontal className="w-4 h-4 text-[#8B5CF6] shrink-0" />
+              <SlidersHorizontal className="w-4 h-4 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0" />
               <span className="truncate">
                 {selectedCategory === 'Todas'
-                  ? 'Categorias'
+                  ? t.catalog.categories
                   : selectedCategory}
               </span>
             </span>
             <ChevronDown
-              className={`w-4 h-4 text-[#9CA3AF] shrink-0 transition-transform ${
+              className={`w-4 h-4 text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] shrink-0 transition-transform ${
                 openDropdown === 'categoria' ? 'rotate-180' : ''
               }`}
             />
           </button>
 
           {openDropdown === 'categoria' && (
-            <div className="absolute left-0 mt-2 w-56 max-h-64 overflow-y-auto rounded-2xl bg-[#1B1924] border border-[#2A2738] shadow-2xl shadow-black/60 z-30 p-1.5">
+            <div className="absolute left-0 mt-2 w-56 max-h-64 overflow-y-auto rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] shadow-xl dark:shadow-2xl dark:shadow-black/60 z-30 p-1.5">
               {['Todas', ...uniqueCategories].map((cat) => {
                 const isSelected = selectedCategory === cat;
+                const displayLabel =
+                  cat === 'Todas' ? t.catalog.allCategories : cat;
                 return (
                   <button
                     key={cat}
@@ -923,12 +954,14 @@ export default function App() {
                     }}
                     className={`w-full min-h-[40px] px-3 rounded-xl text-left text-sm flex items-center justify-between transition-colors ${
                       isSelected
-                        ? 'bg-[#6366F1]/20 text-white font-semibold'
-                        : 'text-[#D1D5DB] hover:bg-[#2A2738]/60'
+                        ? 'bg-[#6366F1]/15 dark:bg-[#6366F1]/20 purple:bg-[#9333EA]/25 text-[#4F46E5] dark:text-white font-semibold'
+                        : 'text-[#374151] dark:text-[#D1D5DB] purple:text-[#DDD6FE] hover:bg-[#F4F5F9] dark:hover:bg-[#2A2738]/60 purple:hover:bg-[#170E2B]'
                     }`}
                   >
-                    <span className="truncate">{cat}</span>
-                    {isSelected && <Check className="w-4 h-4 text-[#8B5CF6] shrink-0" />}
+                    <span className="truncate">{displayLabel}</span>
+                    {isSelected && (
+                      <Check className="w-4 h-4 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0" />
+                    )}
                   </button>
                 );
               })}
@@ -944,22 +977,22 @@ export default function App() {
               setOpenDropdown((prev) => (prev === 'ordenar' ? null : 'ordenar'))
             }
             aria-expanded={openDropdown === 'ordenar'}
-            className="w-full sm:w-auto min-h-[44px] px-4 rounded-2xl bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/40 text-xs sm:text-sm font-medium text-white flex items-center justify-between gap-2 transition-colors"
+            className="w-full sm:w-auto min-h-[44px] px-4 rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-[#6366F1]/40 purple:hover:border-[#A855F7]/60 text-xs sm:text-sm font-medium text-[#111827] dark:text-white flex items-center justify-between gap-2 transition-colors"
           >
             <span className="inline-flex items-center gap-2 truncate">
-              <ArrowDownUp className="w-4 h-4 text-[#8B5CF6] shrink-0" />
-              <span className="truncate">{SORT_LABELS[sortOption]}</span>
+              <ArrowDownUp className="w-4 h-4 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0" />
+              <span className="truncate">{sortLabels[sortOption]}</span>
             </span>
             <ChevronDown
-              className={`w-4 h-4 text-[#9CA3AF] shrink-0 transition-transform ${
+              className={`w-4 h-4 text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] shrink-0 transition-transform ${
                 openDropdown === 'ordenar' ? 'rotate-180' : ''
               }`}
             />
           </button>
 
           {openDropdown === 'ordenar' && (
-            <div className="absolute right-0 sm:left-0 mt-2 w-52 rounded-2xl bg-[#1B1924] border border-[#2A2738] shadow-2xl shadow-black/60 z-30 p-1.5">
-              {(Object.keys(SORT_LABELS) as SortOption[]).map((opt) => {
+            <div className="absolute right-0 sm:left-0 mt-2 w-52 rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] shadow-xl dark:shadow-2xl dark:shadow-black/60 z-30 p-1.5">
+              {(Object.keys(sortLabels) as SortOption[]).map((opt) => {
                 const isSelected = sortOption === opt;
                 return (
                   <button
@@ -971,12 +1004,14 @@ export default function App() {
                     }}
                     className={`w-full min-h-[40px] px-3 rounded-xl text-left text-sm flex items-center justify-between transition-colors ${
                       isSelected
-                        ? 'bg-[#6366F1]/20 text-white font-semibold'
-                        : 'text-[#D1D5DB] hover:bg-[#2A2738]/60'
+                        ? 'bg-[#6366F1]/15 dark:bg-[#6366F1]/20 purple:bg-[#9333EA]/25 text-[#4F46E5] dark:text-white font-semibold'
+                        : 'text-[#374151] dark:text-[#D1D5DB] purple:text-[#DDD6FE] hover:bg-[#F4F5F9] dark:hover:bg-[#2A2738]/60 purple:hover:bg-[#170E2B]'
                     }`}
                   >
-                    <span>{SORT_LABELS[opt]}</span>
-                    {isSelected && <Check className="w-4 h-4 text-[#8B5CF6] shrink-0" />}
+                    <span>{sortLabels[opt]}</span>
+                    {isSelected && (
+                      <Check className="w-4 h-4 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0" />
+                    )}
                   </button>
                 );
               })}
@@ -988,16 +1023,16 @@ export default function App() {
   );
 
   const renderViewToggle = () => (
-    <div className="flex items-center gap-1 p-1 rounded-xl bg-[#1B1924] border border-[#2A2738]">
+    <div className="flex items-center gap-1 p-1 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466]">
       <button
         type="button"
         onClick={() => setViewMode('lista')}
-        aria-label="Modo Lista"
-        title="Modo Lista"
+        aria-label={t.catalog.listMode}
+        title={t.catalog.listMode}
         className={`min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg transition-colors ${
           viewMode === 'lista'
-            ? 'bg-[#6366F1] text-white'
-            : 'text-[#9CA3AF] hover:text-white'
+            ? 'bg-[#6366F1] purple:bg-[#9333EA] text-white'
+            : 'text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white'
         }`}
       >
         <List className="w-4 h-4" />
@@ -1005,12 +1040,12 @@ export default function App() {
       <button
         type="button"
         onClick={() => setViewMode('grade')}
-        aria-label="Modo Grade"
-        title="Modo Grade"
+        aria-label={t.catalog.gridMode}
+        title={t.catalog.gridMode}
         className={`min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg transition-colors ${
           viewMode === 'grade'
-            ? 'bg-[#6366F1] text-white'
-            : 'text-[#9CA3AF] hover:text-white'
+            ? 'bg-[#6366F1] purple:bg-[#9333EA] text-white'
+            : 'text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white'
         }`}
       >
         <LayoutGrid className="w-4 h-4" />
@@ -1019,15 +1054,15 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-[#0F0E13] text-white pb-24">
+    <div className="min-h-screen bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#140C24] text-[#111827] dark:text-white pb-24">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-4 sm:pt-6 space-y-6">
         {/* Top Brand Row */}
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] flex items-center justify-center shrink-0">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] purple:from-[#7E22CE] purple:to-[#C026D3] flex items-center justify-center shrink-0">
               <Gamepad2 className="w-5 h-5 text-white" />
             </div>
-            <h1 className="text-lg sm:text-xl font-extrabold tracking-tight text-white truncate">
+            <h1 className="text-lg sm:text-xl font-extrabold tracking-tight text-[#111827] dark:text-white truncate">
               DroidPort Store
             </h1>
           </div>
@@ -1035,10 +1070,14 @@ export default function App() {
           <button
             type="button"
             onClick={() => void fetchJogos()}
-            aria-label="Atualizar catálogo"
-            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-[#1B1924] border border-[#2A2738] text-[#9CA3AF] hover:text-white hover:border-[#6366F1]/50 transition-colors"
+            aria-label={t.catalog.refreshCatalog}
+            className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 transition-colors"
           >
-            <RefreshCw className={`w-4 h-4 ${loading ? 'animate-spin text-[#8B5CF6]' : ''}`} />
+            <RefreshCw
+              className={`w-4 h-4 ${
+                loading ? 'animate-spin text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC]' : ''
+              }`}
+            />
           </button>
         </header>
 
@@ -1051,8 +1090,8 @@ export default function App() {
             {(loading || featuredGames.length > 0) && (
               <section className="space-y-3">
                 <div className="flex items-center justify-between">
-                  <h2 className="text-base sm:text-lg font-bold text-white">
-                    Destaques ({featuredGames.length})
+                  <h2 className="text-base sm:text-lg font-bold text-[#111827] dark:text-white">
+                    {t.catalog.featured} ({featuredGames.length})
                   </h2>
                 </div>
 
@@ -1061,7 +1100,7 @@ export default function App() {
                     {Array.from({ length: 3 }).map((_, idx) => (
                       <div
                         key={idx}
-                        className="shrink-0 w-[82vw] max-w-[330px] sm:w-[340px] h-[210px] rounded-2xl bg-[#1B1924] border border-[#2A2738] animate-pulse"
+                        className="shrink-0 w-[82vw] max-w-[330px] sm:w-[340px] h-[210px] rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] animate-pulse"
                       />
                     ))}
                   </div>
@@ -1087,16 +1126,13 @@ export default function App() {
             {/* 4. Seção Todos os jogos (X) */}
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base sm:text-lg font-bold text-white">
-                  Todos os jogos ({filteredGames.length})
+                <h2 className="text-base sm:text-lg font-bold text-[#111827] dark:text-white">
+                  {t.catalog.allGames} ({filteredGames.length})
                 </h2>
                 {renderViewToggle()}
               </div>
 
-              {renderGameList(
-                filteredGames,
-                'Nenhum jogo encontrado com os filtros atuais.'
-              )}
+              {renderGameList(filteredGames, t.catalog.emptyFilter)}
             </section>
           </div>
         )}
@@ -1108,16 +1144,13 @@ export default function App() {
             {renderFiltersSection()}
             <section className="space-y-3">
               <div className="flex items-center justify-between gap-3">
-                <h2 className="text-base sm:text-lg font-bold text-white">
-                  Todos os jogos ({filteredGames.length})
+                <h2 className="text-base sm:text-lg font-bold text-[#111827] dark:text-white">
+                  {t.catalog.allGames} ({filteredGames.length})
                 </h2>
                 {renderViewToggle()}
               </div>
 
-              {renderGameList(
-                filteredGames,
-                'Nenhum jogo encontrado no catálogo.'
-              )}
+              {renderGameList(filteredGames, t.catalog.emptyCatalog)}
             </section>
           </div>
         )}
@@ -1126,16 +1159,13 @@ export default function App() {
         {activeTab === 'favoritos' && (
           <section className="space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base sm:text-lg font-bold text-white">
-                Favoritos ({favoriteGames.length})
+              <h2 className="text-base sm:text-lg font-bold text-[#111827] dark:text-white">
+                {t.catalog.favorites} ({favoriteGames.length})
               </h2>
               {renderViewToggle()}
             </div>
 
-            {renderGameList(
-              favoriteGames,
-              'Você ainda não favoritou nenhum jogo. Toque no coração de qualquer port para salvá-lo aqui.'
-            )}
+            {renderGameList(favoriteGames, t.catalog.emptyFavorites)}
           </section>
         )}
 
@@ -1143,18 +1173,18 @@ export default function App() {
         {activeTab === 'historico' && (
           <section className="space-y-4">
             <div className="flex items-center justify-between gap-3">
-              <h2 className="text-base sm:text-lg font-bold text-white">
-                Histórico ({downloadList.length})
+              <h2 className="text-base sm:text-lg font-bold text-[#111827] dark:text-white">
+                {t.history.title} ({downloadList.length})
               </h2>
 
               {downloadList.length > 0 && (
                 <button
                   type="button"
                   onClick={() => void handleClearCache()}
-                  className="min-h-[40px] px-3 rounded-xl bg-[#1B1924] border border-[#2A2738] hover:border-rose-500/40 text-xs font-semibold text-[#9CA3AF] hover:text-white inline-flex items-center gap-1.5 transition-colors"
+                  className="min-h-[40px] px-3 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-rose-500/40 text-xs font-semibold text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white inline-flex items-center gap-1.5 transition-colors"
                 >
                   <Trash2 className="w-3.5 h-3.5" />
-                  <span>Limpar histórico</span>
+                  <span>{t.history.clearHistory}</span>
                 </button>
               )}
             </div>
@@ -1170,13 +1200,14 @@ export default function App() {
         {/* Tab: Configurações */}
         {activeTab === 'configuracoes' && (
           <section className="space-y-4">
-            <h2 className="text-base sm:text-lg font-bold text-white">
-              Configurações
+            <h2 className="text-base sm:text-lg font-bold text-[#111827] dark:text-white">
+              {t.settings.title}
             </h2>
             <SettingsView
-              appVersion={VERSAO_APP}
+              appVersion={APP_VERSION}
               favoritesCount={favorites.length}
               downloadsCount={downloadList.length}
+              onCheckUpdatesNow={() => checkForUpdatesNow(true)}
               onClearCache={handleClearCache}
               onClearFavorites={handleClearFavorites}
             />
@@ -1195,16 +1226,16 @@ export default function App() {
       {/* 5. Fixed Bottom Navigation Bar */}
       <nav
         aria-label="Navegação principal"
-        className="fixed bottom-0 left-0 right-0 z-40 bg-[#1B1924]/95 backdrop-blur-md border-t border-[#2A2738] pb-safe"
+        className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-[#1B1924]/95 purple:bg-[#20143A]/95 backdrop-blur-md border-t border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] pb-safe"
       >
         <div className="max-w-3xl mx-auto grid grid-cols-5 items-center h-16 px-1">
           {(
             [
-              { id: 'inicio', label: 'Início', icon: Home },
-              { id: 'jogos', label: 'Jogos', icon: Gamepad2 },
-              { id: 'favoritos', label: 'Favoritos', icon: Heart },
-              { id: 'historico', label: 'Histórico', icon: History },
-              { id: 'configuracoes', label: 'Configurações', icon: Settings },
+              { id: 'inicio', label: t.nav.inicio, icon: Home },
+              { id: 'jogos', label: t.nav.jogos, icon: Gamepad2 },
+              { id: 'favoritos', label: t.nav.favoritos, icon: Heart },
+              { id: 'historico', label: t.nav.historico, icon: History },
+              { id: 'configuracoes', label: t.nav.configuracoes, icon: Settings },
             ] as const
           ).map((item) => {
             const Icon = item.icon;
@@ -1217,14 +1248,16 @@ export default function App() {
                 onClick={() => setActiveTab(item.id)}
                 className={`relative min-h-[44px] flex flex-col items-center justify-center gap-1 rounded-xl px-0.5 transition-colors ${
                   isActive
-                    ? 'text-[#8B5CF6]'
-                    : 'text-[#9CA3AF] hover:text-white'
+                    ? 'text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC]'
+                    : 'text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white'
                 }`}
               >
                 <div className="relative">
                   <Icon
                     className={`w-5 h-5 ${
-                      isActive && item.id === 'favoritos' ? 'fill-[#8B5CF6]' : ''
+                      isActive && item.id === 'favoritos'
+                        ? 'fill-[#6366F1] dark:fill-[#8B5CF6] purple:fill-[#C084FC]'
+                        : ''
                     }`}
                   />
                 </div>

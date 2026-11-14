@@ -12,6 +12,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import { usePreferences } from '../context/PreferencesContext';
 import {
   communitySupabase,
   isNativeApp,
@@ -53,16 +54,35 @@ const FPS_OPTIONS = [15, 20, 25, 30, 40, 45, 60, 90, 120, 144] as const;
 
 const TAG_OPTIONS = [
   'FPS estável',
-  'Engasgos',
-  'Fecha sozinho',
-  'Falhas gráficas',
+  '60 FPS cravados',
+  '30 FPS jogável',
+  'Engasgos leves',
+  'Quedas bruscas de FPS',
+  'Fecha sozinho (Crash)',
+  'Tela preta ao abrir',
+  'Falhas gráficas / Texturas',
+  'Sem sombras / Iluminação',
   'Problemas de áudio',
+  'Áudio estourado / Sem som',
   'Esquenta muito',
   'Gasta muita bateria',
   'Carregamento demorado',
-  'Precisa de patch',
+  'Precisa de patch / fix',
   'Funciona com controle',
+  'Controle não reconhecido',
   'Toque funciona bem',
+  'Botões na tela ruins',
+  'Tradução PT-BR funciona',
+  'Save funciona normal',
+  'Bug no save',
+  'Sem internet (Offline)',
+  'Precisa de internet',
+  'Roda bem em celular fraco',
+  'Exige celular potente',
+  'Resolução baixa / Borrado',
+  'Tela esticada / Corte',
+  'Sem bugs até agora',
+  'Zerei o jogo nesse port',
 ] as const;
 
 const MAX_TAGS = 6;
@@ -77,12 +97,12 @@ const RATING_LABELS: Record<number, string> = {
 
 function getRatingStyles(nota: number): string {
   if (nota >= 4) {
-    return 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30';
+    return 'bg-emerald-500/12 text-emerald-700 dark:text-emerald-300 border-emerald-500/30';
   }
   if (nota === 3) {
-    return 'bg-amber-500/15 text-amber-300 border-amber-500/30';
+    return 'bg-amber-500/12 text-amber-700 dark:text-amber-300 border-amber-500/30';
   }
-  return 'bg-rose-500/15 text-rose-300 border-rose-500/30';
+  return 'bg-rose-500/12 text-rose-700 dark:text-rose-300 border-rose-500/30';
 }
 
 function formatRelativeTime(isoDate: string): string {
@@ -144,13 +164,13 @@ function ReportAvatar({ name, avatarUrl }: ReportAvatarProps) {
         alt={name}
         referrerPolicy="no-referrer"
         onError={() => setImgFailed(true)}
-        className="w-10 h-10 rounded-full object-cover border border-[#2A2738] shrink-0"
+        className="w-10 h-10 rounded-full object-cover border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] shrink-0"
       />
     );
   }
 
   return (
-    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] text-white font-bold text-sm flex items-center justify-center shrink-0 border border-[#8B5CF6]/40">
+    <div className="w-10 h-10 rounded-full bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] purple:from-[#7E22CE] purple:to-[#C026D3] text-white font-bold text-sm flex items-center justify-center shrink-0 border border-[#8B5CF6]/40 purple:border-[#C084FC]/50">
       {initial}
     </div>
   );
@@ -169,6 +189,7 @@ export function DeviceCompatibilitySection({
   autoOpenReportModal = false,
   onConsumeAutoOpen,
 }: DeviceCompatibilitySectionProps) {
+  const { t } = usePreferences();
   const [relatos, setRelatos] = useState<RelatoDesempenho[]>([]);
   const [loadingRelatos, setLoadingRelatos] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -180,6 +201,7 @@ export function DeviceCompatibilitySection({
   const [authError, setAuthError] = useState<string | null>(null);
 
   const [showReportModal, setShowReportModal] = useState(false);
+  const [editingRelatoId, setEditingRelatoId] = useState<string | null>(null);
   const [editingSpecs, setEditingSpecs] = useState(false);
   const [detectingDevice, setDetectingDevice] = useState(false);
 
@@ -195,7 +217,9 @@ export function DeviceCompatibilitySection({
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
   const [submitting, setSubmitting] = useState(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
-  const [submitSuccess, setSubmitSuccess] = useState(false);
+  const [submitSuccessMessage, setSubmitSuccessMessage] = useState<string | null>(
+    null
+  );
 
   const fetchRelatos = useCallback(async () => {
     setLoadingRelatos(true);
@@ -228,6 +252,7 @@ export function DeviceCompatibilitySection({
   }, [fetchRelatos]);
 
   const openReportFormWithDetection = useCallback(async () => {
+    setEditingRelatoId(null);
     setSubmitError(null);
     setFps(null);
     setNota(4);
@@ -354,6 +379,23 @@ export function DeviceCompatibilitySection({
     });
   };
 
+  const handleEditOwnReport = (relato: RelatoDesempenho) => {
+    setEditingRelatoId(relato.id);
+    setSubmitError(null);
+    setDetectingDevice(false);
+    setEditingSpecs(false);
+    setMarca(relato.marca || '');
+    setModelo(relato.modelo || '');
+    setChipset(relato.chipset || '');
+    setGpu(relato.gpu || '');
+    setRam(relato.ram || '');
+    setAndroidVersao(relato.android_versao || '');
+    setFps(typeof relato.fps === 'number' ? relato.fps : null);
+    setNota(relato.nota || 4);
+    setSelectedTags(Array.isArray(relato.tags) ? relato.tags : []);
+    setShowReportModal(true);
+  };
+
   const handleSubmitReport = async (e: React.FormEvent) => {
     e.preventDefault();
     setSubmitError(null);
@@ -391,25 +433,53 @@ export function DeviceCompatibilitySection({
         tags: selectedTags,
       };
 
-      const { data, error } = await communitySupabase
-        .from('relatos_desempenho')
-        .insert(payload)
-        .select()
-        .single();
+      if (editingRelatoId) {
+        const { data, error } = await communitySupabase
+          .from('relatos_desempenho')
+          .update(payload)
+          .eq('id', editingRelatoId)
+          .eq('user_id', currentUser.id)
+          .select()
+          .single();
 
-      if (error) {
-        throw new Error(error.message);
-      }
+        if (error) {
+          throw new Error(error.message);
+        }
 
-      if (data) {
-        setRelatos((prev) => [data as RelatoDesempenho, ...prev]);
+        if (data) {
+          const updated = data as RelatoDesempenho;
+          setRelatos((prev) =>
+            prev.map((item) => (item.id === editingRelatoId ? updated : item))
+          );
+        } else {
+          await fetchRelatos();
+        }
+
+        setEditingRelatoId(null);
+        setShowReportModal(false);
+        setSubmitSuccessMessage(t.community.updateSuccess);
+        setTimeout(() => setSubmitSuccessMessage(null), 3500);
       } else {
-        await fetchRelatos();
-      }
+        const { data, error } = await communitySupabase
+          .from('relatos_desempenho')
+          .insert(payload)
+          .select()
+          .single();
 
-      setShowReportModal(false);
-      setSubmitSuccess(true);
-      setTimeout(() => setSubmitSuccess(false), 3500);
+        if (error) {
+          throw new Error(error.message);
+        }
+
+        if (data) {
+          setRelatos((prev) => [data as RelatoDesempenho, ...prev]);
+        } else {
+          await fetchRelatos();
+        }
+
+        setShowReportModal(false);
+        setSubmitSuccessMessage(t.community.reportSuccess);
+        setTimeout(() => setSubmitSuccessMessage(null), 3500);
+      }
     } catch (err) {
       setSubmitError(
         err instanceof Error
@@ -503,45 +573,45 @@ export function DeviceCompatibilitySection({
   }, [relatos, deviceSearch]);
 
   return (
-    <section className="rounded-3xl bg-[#1B1924] border border-[#2A2738] p-5 sm:p-6 space-y-5">
+    <section className="rounded-3xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-5 sm:p-6 space-y-5">
       {/* Header + Primary CTA */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div className="space-y-1">
           <div className="flex items-center gap-2">
-            <Smartphone className="w-5 h-5 text-[#8B5CF6] shrink-0" />
-            <h2 className="text-lg font-extrabold text-white tracking-tight">
-              Roda no seu celular?
+            <Smartphone className="w-5 h-5 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0" />
+            <h2 className="text-lg font-extrabold text-[#111827] dark:text-white tracking-tight">
+              {t.community.sectionTitle}
             </h2>
           </div>
-          <p className="text-xs text-[#9CA3AF]">
-            Relatos reais da comunidade sobre desempenho de {jogoTitulo}
+          <p className="text-xs text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+            {t.community.sectionSubtitle} {jogoTitulo}
           </p>
         </div>
 
         <button
           type="button"
           onClick={() => void handleClickReportButton()}
-          className="min-h-[44px] px-4 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 shadow-md shadow-[#6366F1]/25 active:scale-[0.98] transition-all shrink-0"
+          className="min-h-[44px] px-4 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] purple:from-[#7E22CE] purple:to-[#C026D3] purple:hover:from-[#6B21A8] purple:hover:to-[#A21CAF] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 shadow-md shadow-[#6366F1]/25 purple:shadow-[#9333EA]/30 active:scale-[0.98] transition-all shrink-0"
         >
           <MessageSquarePlus className="w-4 h-4 shrink-0" />
-          <span>Relatar meu aparelho</span>
+          <span>{t.community.reportDevice}</span>
         </button>
       </div>
 
       {/* Logged-in account bar */}
       {currentUser && (
-        <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#0F0E13] border border-[#2A2738] px-3.5 py-2.5">
+        <div className="flex items-center justify-between gap-3 rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] px-3.5 py-2.5">
           <div className="flex items-center gap-2.5 min-w-0">
             <ReportAvatar
               name={getUserDisplayName(currentUser)}
               avatarUrl={getUserAvatarUrl(currentUser)}
             />
             <div className="min-w-0">
-              <p className="text-xs font-semibold text-white truncate">
-                Conectado como {getUserDisplayName(currentUser)}
+              <p className="text-xs font-semibold text-[#111827] dark:text-white truncate">
+                {t.community.connectedAs} {getUserDisplayName(currentUser)}
               </p>
               {currentUser.email && (
-                <p className="text-[11px] text-[#9CA3AF] truncate">
+                <p className="text-[11px] text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] truncate">
                   {currentUser.email}
                 </p>
               )}
@@ -551,69 +621,86 @@ export function DeviceCompatibilitySection({
           <button
             type="button"
             onClick={() => void handleSignOut()}
-            className="min-h-[36px] px-2.5 rounded-lg text-xs font-medium text-[#9CA3AF] hover:text-white hover:bg-[#1B1924] inline-flex items-center gap-1.5 transition-colors shrink-0"
+            className="min-h-[36px] px-2.5 rounded-lg text-xs font-medium text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white hover:bg-white dark:hover:bg-[#1B1924] purple:hover:bg-[#20143A] inline-flex items-center gap-1.5 transition-colors shrink-0"
           >
             <LogOut className="w-3.5 h-3.5" />
-            <span>Sair</span>
+            <span>{t.community.signOut}</span>
           </button>
         </div>
       )}
 
-      {submitSuccess && (
-        <div className="rounded-xl bg-emerald-500/15 border border-emerald-500/30 px-3.5 py-2.5 text-xs font-medium text-emerald-300 flex items-center gap-2">
+      {submitSuccessMessage && (
+        <div className="rounded-xl bg-emerald-500/12 border border-emerald-500/30 px-3.5 py-2.5 text-xs font-medium text-emerald-700 dark:text-emerald-300 flex items-center gap-2">
           <Check className="w-4 h-4 shrink-0" />
-          <span>Relato enviado com sucesso! Obrigado por ajudar a comunidade.</span>
+          <span>{submitSuccessMessage}</span>
         </div>
       )}
 
       {/* Summary metrics */}
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-2.5">
-        <div className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-3.5 space-y-1">
-          <p className="text-[11px] font-medium text-[#9CA3AF]">Nota geral</p>
-          <p className="text-xl font-extrabold text-white font-mono-nums">
-            {summary.mediaNota}{' '}
-            <span className="text-xs font-semibold text-[#9CA3AF]">de 5</span>
+        <div className="rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-3.5 space-y-1">
+          <p className="text-[11px] font-medium text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+            {t.community.overallRating}
           </p>
-          <p className="text-[11px] text-[#9CA3AF] font-mono-nums">
-            {summary.total} {summary.total === 1 ? 'relato' : 'relatos'}
+          <p className="text-xl font-extrabold text-[#111827] dark:text-white font-mono-nums">
+            {summary.mediaNota}{' '}
+            <span className="text-xs font-semibold text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+              {t.community.ofFive}
+            </span>
+          </p>
+          <p className="text-[11px] text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] font-mono-nums">
+            {summary.total}{' '}
+            {summary.total === 1
+              ? t.community.reportSingular
+              : t.community.reportPlural}
           </p>
         </div>
 
-        <div className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-3.5 space-y-1">
-          <p className="text-[11px] font-medium text-[#9CA3AF]">Média de FPS</p>
-          <p className="text-xl font-extrabold text-white font-mono-nums">
+        <div className="rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-3.5 space-y-1">
+          <p className="text-[11px] font-medium text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+            {t.community.avgFps}
+          </p>
+          <p className="text-xl font-extrabold text-[#111827] dark:text-white font-mono-nums">
             {summary.mediaFps !== null ? `${summary.mediaFps}` : '—'}{' '}
             {summary.mediaFps !== null && (
-              <span className="text-xs font-semibold text-[#8B5CF6]">FPS</span>
+              <span className="text-xs font-semibold text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC]">
+                FPS
+              </span>
             )}
           </p>
-          <p className="text-[11px] text-[#9CA3AF]">Entre relatos com FPS</p>
+          <p className="text-[11px] text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+            {t.community.amongFpsReports}
+          </p>
         </div>
 
-        <div className="col-span-2 rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-3.5 flex flex-col justify-between gap-2">
-          <p className="text-[11px] font-medium text-[#9CA3AF]">
-            Distribuição dos relatos
+        <div className="col-span-2 rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-3.5 flex flex-col justify-between gap-2">
+          <p className="text-[11px] font-medium text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+            {t.community.distribution}
           </p>
           <div className="grid grid-cols-3 gap-2">
             <div className="rounded-xl bg-emerald-500/10 border border-emerald-500/25 px-2.5 py-2 text-center">
-              <p className="text-base font-extrabold text-emerald-300 font-mono-nums">
+              <p className="text-base font-extrabold text-emerald-700 dark:text-emerald-300 font-mono-nums">
                 {summary.bom}
               </p>
-              <p className="text-[11px] font-medium text-emerald-300/90">Bom</p>
+              <p className="text-[11px] font-medium text-emerald-700/90 dark:text-emerald-300/90">
+                {t.community.good}
+              </p>
             </div>
             <div className="rounded-xl bg-amber-500/10 border border-amber-500/25 px-2.5 py-2 text-center">
-              <p className="text-base font-extrabold text-amber-300 font-mono-nums">
+              <p className="text-base font-extrabold text-amber-700 dark:text-amber-300 font-mono-nums">
                 {summary.jogavel}
               </p>
-              <p className="text-[11px] font-medium text-amber-300/90">
-                Jogável
+              <p className="text-[11px] font-medium text-amber-700/90 dark:text-amber-300/90">
+                {t.community.playable}
               </p>
             </div>
             <div className="rounded-xl bg-rose-500/10 border border-rose-500/25 px-2.5 py-2 text-center">
-              <p className="text-base font-extrabold text-rose-300 font-mono-nums">
+              <p className="text-base font-extrabold text-rose-700 dark:text-rose-300 font-mono-nums">
                 {summary.ruim}
               </p>
-              <p className="text-[11px] font-medium text-rose-300/90">Ruim</p>
+              <p className="text-[11px] font-medium text-rose-700/90 dark:text-rose-300/90">
+                {t.community.bad}
+              </p>
             </div>
           </div>
         </div>
@@ -621,21 +708,21 @@ export function DeviceCompatibilitySection({
 
       {/* Device Search Bar */}
       <div className="relative">
-        <Search className="w-4 h-4 text-[#9CA3AF] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
+        <Search className="w-4 h-4 text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] absolute left-3.5 top-1/2 -translate-y-1/2 pointer-events-none" />
         <input
           type="search"
           value={deviceSearch}
           onChange={(e) => setDeviceSearch(e.target.value)}
-          placeholder="Filtrar por aparelho, marca, Snapdragon, Mali, Adreno..."
-          aria-label="Filtrar relatos por aparelho"
-          className="w-full h-11 pl-10 pr-10 rounded-xl bg-[#0F0E13] border border-[#2A2738] text-xs sm:text-sm text-white placeholder-[#9CA3AF] focus:outline-none focus:border-[#6366F1] transition-colors"
+          placeholder={t.community.searchPlaceholder}
+          aria-label={t.community.searchPlaceholder}
+          className="w-full h-11 pl-10 pr-10 rounded-xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs sm:text-sm text-[#111827] dark:text-white placeholder-[#525866] dark:placeholder-[#9CA3AF] purple:placeholder-[#C4B5FD]/75 focus:outline-none focus:border-[#6366F1] purple:focus:border-[#C084FC] transition-colors"
         />
         {deviceSearch && (
           <button
             type="button"
             onClick={() => setDeviceSearch('')}
             aria-label="Limpar filtro de aparelho"
-            className="absolute right-1.5 top-1/2 -translate-y-1/2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-[#9CA3AF] hover:text-white"
+            className="absolute right-1.5 top-1/2 -translate-y-1/2 min-w-[36px] min-h-[36px] flex items-center justify-center rounded-lg text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white"
           >
             <X className="w-4 h-4" />
           </button>
@@ -648,32 +735,32 @@ export function DeviceCompatibilitySection({
           {Array.from({ length: 2 }).map((_, idx) => (
             <div
               key={idx}
-              className="h-28 rounded-2xl bg-[#0F0E13] border border-[#2A2738] animate-pulse"
+              className="h-28 rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] animate-pulse"
             />
           ))}
         </div>
       ) : loadError ? (
-        <div className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-5 text-center space-y-2">
-          <p className="text-xs text-rose-400">{loadError}</p>
+        <div className="rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-5 text-center space-y-2">
+          <p className="text-xs text-rose-500 dark:text-rose-400">{loadError}</p>
           <button
             type="button"
             onClick={() => void fetchRelatos()}
-            className="min-h-[40px] px-4 rounded-xl bg-[#1B1924] border border-[#2A2738] text-xs font-semibold text-white hover:border-[#6366F1]/50"
+            className="min-h-[40px] px-4 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs font-semibold text-[#111827] dark:text-white hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60"
           >
-            Tentar novamente
+            {t.community.retry}
           </button>
         </div>
       ) : filteredRelatos.length === 0 ? (
-        <div className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-6 text-center space-y-1.5">
-          <p className="text-sm font-bold text-white">
+        <div className="rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-6 text-center space-y-1.5">
+          <p className="text-sm font-bold text-[#111827] dark:text-white">
             {relatos.length === 0
-              ? 'Ainda não há relatos para este jogo'
-              : 'Nenhum aparelho encontrado com esse filtro'}
+              ? t.community.emptyTitle
+              : t.community.emptyFilterTitle}
           </p>
-          <p className="text-xs text-[#9CA3AF]">
+          <p className="text-xs text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
             {relatos.length === 0
-              ? 'Seja o primeiro a testar e compartilhar como este port roda no seu celular.'
-              : 'Tente buscar por outro modelo, marca ou processador.'}
+              ? t.community.emptyDesc
+              : t.community.emptyFilterDesc}
           </p>
         </div>
       ) : (
@@ -693,7 +780,7 @@ export function DeviceCompatibilitySection({
             return (
               <article
                 key={relato.id}
-                className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-4 space-y-3"
+                className="rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-4 space-y-3"
               >
                 <div className="flex items-start justify-between gap-3">
                   <div className="flex items-center gap-3 min-w-0">
@@ -702,10 +789,10 @@ export function DeviceCompatibilitySection({
                       avatarUrl={relato.usuario_avatar}
                     />
                     <div className="min-w-0">
-                      <p className="text-sm font-bold text-white truncate">
+                      <p className="text-sm font-bold text-[#111827] dark:text-white truncate">
                         {relato.usuario_nome}
                       </p>
-                      <p className="text-xs text-[#9CA3AF]">
+                      <p className="text-xs text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
                         {formatRelativeTime(relato.created_at)}
                       </p>
                     </div>
@@ -721,29 +808,40 @@ export function DeviceCompatibilitySection({
                     </span>
 
                     {isOwner && (
-                      <button
-                        type="button"
-                        onClick={() => void handleDeleteOwnReport(relato.id)}
-                        aria-label="Excluir meu relato"
-                        title="Excluir meu relato"
-                        className="min-w-[34px] min-h-[34px] flex items-center justify-center rounded-lg text-[#9CA3AF] hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
-                      >
-                        <Trash2 className="w-4 h-4" />
-                      </button>
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => handleEditOwnReport(relato)}
+                          aria-label={t.community.edit}
+                          title={t.community.edit}
+                          className="min-w-[34px] min-h-[34px] flex items-center justify-center rounded-lg text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#6366F1] dark:hover:text-[#A5B4FC] purple:hover:text-[#D8B4FE] hover:bg-[#6366F1]/12 purple:hover:bg-[#9333EA]/20 transition-colors"
+                        >
+                          <Pencil className="w-4 h-4" />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleDeleteOwnReport(relato.id)}
+                          aria-label="Excluir meu relato"
+                          title="Excluir meu relato"
+                          className="min-w-[34px] min-h-[34px] flex items-center justify-center rounded-lg text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-rose-500 dark:hover:text-rose-400 hover:bg-rose-500/10 transition-colors"
+                        >
+                          <Trash2 className="w-4 h-4" />
+                        </button>
+                      </div>
                     )}
                   </div>
                 </div>
 
                 <div className="space-y-1.5">
                   <div className="flex flex-wrap items-center gap-2">
-                    <span className="text-sm font-bold text-white">
+                    <span className="text-sm font-bold text-[#111827] dark:text-white">
                       {relato.modelo}
                     </span>
-                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-[#1B1924] border border-[#2A2738] text-[11px] font-semibold text-[#A5B4FC]">
+                    <span className="inline-flex items-center px-2 py-0.5 rounded-md bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[11px] font-semibold text-[#4F46E5] dark:text-[#A5B4FC] purple:text-[#D8B4FE]">
                       {relato.marca}
                     </span>
                     {typeof relato.fps === 'number' && relato.fps > 0 && (
-                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#6366F1]/15 border border-[#6366F1]/35 text-[11px] font-bold font-mono-nums text-[#C4B5FD]">
+                      <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-[#6366F1]/12 purple:bg-[#9333EA]/25 border border-[#6366F1]/35 purple:border-[#C084FC]/45 text-[11px] font-bold font-mono-nums text-[#4F46E5] dark:text-[#C4B5FD] purple:text-[#E9D5FF]">
                         <Gauge className="w-3 h-3" />
                         {relato.fps} FPS
                       </span>
@@ -751,7 +849,7 @@ export function DeviceCompatibilitySection({
                   </div>
 
                   {hardwareSpecs.length > 0 && (
-                    <p className="text-xs text-[#9CA3AF] leading-relaxed">
+                    <p className="text-xs text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] leading-relaxed">
                       {hardwareSpecs.join(' · ')}
                     </p>
                   )}
@@ -762,7 +860,7 @@ export function DeviceCompatibilitySection({
                     {relato.tags.map((tag) => (
                       <span
                         key={tag}
-                        className="inline-flex items-center px-2.5 py-1 rounded-full bg-[#1B1924] border border-[#2A2738] text-[11px] font-medium text-[#D1D5DB]"
+                        className="inline-flex items-center px-2.5 py-1 rounded-full bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[11px] font-medium text-[#374151] dark:text-[#D1D5DB] purple:text-[#DDD6FE]"
                       >
                         {tag}
                       </span>
@@ -778,34 +876,34 @@ export function DeviceCompatibilitySection({
       {/* Modal 1: Google OAuth Prompt */}
       {showAuthModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
+          className="fixed inset-0 z-50 bg-black/75 dark:bg-black/80 backdrop-blur-sm flex items-center justify-center p-4"
           onClick={() => setShowAuthModal(false)}
         >
           <div
-            className="w-full max-w-sm rounded-3xl bg-[#1B1924] border border-[#2A2738] p-6 space-y-5 shadow-2xl"
+            className="w-full max-w-sm rounded-3xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-6 space-y-5 shadow-2xl"
             onClick={(e) => e.stopPropagation()}
           >
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
-                <h3 className="text-lg font-extrabold text-white">
-                  Entrar com Google
+                <h3 className="text-lg font-extrabold text-[#111827] dark:text-white">
+                  {t.community.authTitle}
                 </h3>
-                <p className="text-xs text-[#9CA3AF] leading-relaxed">
-                  Faça login com sua conta Google para publicar como este jogo roda no seu aparelho.
+                <p className="text-xs text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] leading-relaxed">
+                  {t.community.authDesc}
                 </p>
               </div>
               <button
                 type="button"
                 onClick={() => setShowAuthModal(false)}
                 aria-label="Fechar login"
-                className="min-w-[36px] min-h-[36px] -mt-1 -mr-1 flex items-center justify-center rounded-xl text-[#9CA3AF] hover:text-white hover:bg-[#2A2738]"
+                className="min-w-[36px] min-h-[36px] -mt-1 -mr-1 flex items-center justify-center rounded-xl text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white hover:bg-[#F4F5F9] dark:hover:bg-[#2A2738] purple:hover:bg-[#170E2B]"
               >
                 <X className="w-4 h-4" />
               </button>
             </div>
 
             {authError && (
-              <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/25 rounded-xl px-3 py-2">
+              <p className="text-xs text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/25 rounded-xl px-3 py-2">
                 {authError}
               </p>
             )}
@@ -815,7 +913,7 @@ export function DeviceCompatibilitySection({
                 type="button"
                 disabled={authLoading}
                 onClick={() => void handleGoogleSignIn()}
-                className="w-full min-h-[48px] px-4 rounded-xl bg-white hover:bg-gray-100 disabled:opacity-60 text-[#0F0E13] text-sm font-bold inline-flex items-center justify-center gap-2.5 transition-colors"
+                className="w-full min-h-[48px] px-4 rounded-xl bg-[#F4F5F9] dark:bg-white hover:bg-[#E8EAF2] dark:hover:bg-gray-100 border border-[#E2E4EC] dark:border-transparent disabled:opacity-60 text-[#111827] dark:text-[#0F0E13] text-sm font-bold inline-flex items-center justify-center gap-2.5 transition-colors"
               >
                 <svg className="w-5 h-5 shrink-0" viewBox="0 0 24 24" aria-hidden="true">
                   <path
@@ -836,16 +934,16 @@ export function DeviceCompatibilitySection({
                   />
                 </svg>
                 <span>
-                  {authLoading ? 'Redirecionando...' : 'Entrar com Google'}
+                  {authLoading ? t.settings.redirecting : t.community.signInGoogle}
                 </span>
               </button>
 
               <button
                 type="button"
                 onClick={() => setShowAuthModal(false)}
-                className="w-full min-h-[44px] rounded-xl bg-[#0F0E13] border border-[#2A2738] text-xs font-semibold text-[#9CA3AF] hover:text-white transition-colors"
+                className="w-full min-h-[44px] rounded-xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs font-semibold text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white transition-colors"
               >
-                Cancelar
+                {t.community.cancel}
               </button>
             </div>
           </div>
@@ -855,21 +953,21 @@ export function DeviceCompatibilitySection({
       {/* Modal 2: "Como rodou no seu aparelho?" */}
       {showReportModal && (
         <div
-          className="fixed inset-0 z-50 bg-black/85 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4"
+          className="fixed inset-0 z-50 bg-black/75 dark:bg-black/85 backdrop-blur-sm flex items-end sm:items-center justify-center sm:p-4"
           onClick={() => !submitting && setShowReportModal(false)}
         >
           <form
             onSubmit={handleSubmitReport}
             onClick={(e) => e.stopPropagation()}
-            className="w-full sm:max-w-xl max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-[#1B1924] border border-[#2A2738] p-5 sm:p-6 space-y-5 shadow-2xl"
+            className="w-full sm:max-w-xl max-h-[92vh] overflow-y-auto rounded-t-3xl sm:rounded-3xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-5 sm:p-6 space-y-5 shadow-2xl"
           >
             {/* Modal Header */}
             <div className="flex items-start justify-between gap-3">
               <div>
-                <h3 className="text-lg font-extrabold text-white">
-                  Como rodou no seu aparelho?
+                <h3 className="text-lg font-extrabold text-[#111827] dark:text-white">
+                  {t.community.modalTitle}
                 </h3>
-                <p className="text-xs text-[#9CA3AF] mt-0.5 truncate">
+                <p className="text-xs text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] mt-0.5 truncate">
                   {jogoTitulo}
                 </p>
               </div>
@@ -878,38 +976,38 @@ export function DeviceCompatibilitySection({
                 disabled={submitting}
                 onClick={() => setShowReportModal(false)}
                 aria-label="Fechar formulário de relato"
-                className="min-w-[40px] min-h-[40px] -mt-1 -mr-1 flex items-center justify-center rounded-xl text-[#9CA3AF] hover:text-white hover:bg-[#2A2738]"
+                className="min-w-[40px] min-h-[40px] -mt-1 -mr-1 flex items-center justify-center rounded-xl text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white hover:bg-[#F4F5F9] dark:hover:bg-[#2A2738] purple:hover:bg-[#170E2B]"
               >
                 <X className="w-5 h-5" />
               </button>
             </div>
 
             {/* Top Card: Detected Hardware */}
-            <div className="rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-4 space-y-3">
+            <div className="rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-4 space-y-3">
               <div className="flex items-center justify-between gap-2">
                 <div className="flex items-center gap-2">
-                  <Cpu className="w-4 h-4 text-[#8B5CF6] shrink-0" />
-                  <span className="text-xs font-bold text-white">
+                  <Cpu className="w-4 h-4 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0" />
+                  <span className="text-xs font-bold text-[#111827] dark:text-white">
                     {detectingDevice
-                      ? 'Detectando seu aparelho...'
-                      : 'Aparelho detectado'}
+                      ? t.community.detectingDevice
+                      : t.community.detectedDevice}
                   </span>
                 </div>
 
                 <button
                   type="button"
                   onClick={() => setEditingSpecs((prev) => !prev)}
-                  className="min-h-[34px] px-2.5 rounded-lg bg-[#1B1924] border border-[#2A2738] hover:border-[#6366F1]/50 text-xs font-semibold text-[#A5B4FC] inline-flex items-center gap-1.5 transition-colors"
+                  className="min-h-[34px] px-2.5 rounded-lg bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 text-xs font-semibold text-[#4F46E5] dark:text-[#A5B4FC] purple:text-[#D8B4FE] inline-flex items-center gap-1.5 transition-colors"
                 >
                   {editingSpecs ? (
                     <>
                       <Check className="w-3.5 h-3.5" />
-                      <span>Concluir</span>
+                      <span>{t.community.done}</span>
                     </>
                   ) : (
                     <>
                       <Pencil className="w-3.5 h-3.5" />
-                      <span>Editar</span>
+                      <span>{t.community.edit}</span>
                     </>
                   )}
                 </button>
@@ -918,41 +1016,51 @@ export function DeviceCompatibilitySection({
               {!editingSpecs ? (
                 <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs">
                   <div>
-                    <span className="text-[#9CA3AF]">Modelo: </span>
-                    <span className="font-semibold text-white">
-                      {modelo || 'Não detectado'}
+                    <span className="text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+                      {t.community.model}:{' '}
+                    </span>
+                    <span className="font-semibold text-[#111827] dark:text-white">
+                      {modelo || t.community.notDetected}
                     </span>
                   </div>
                   <div>
-                    <span className="text-[#9CA3AF]">Chipset: </span>
-                    <span className="font-semibold text-white">
-                      {chipset || 'Não detectado'}
+                    <span className="text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+                      {t.community.chipset}:{' '}
+                    </span>
+                    <span className="font-semibold text-[#111827] dark:text-white">
+                      {chipset || t.community.notDetected}
                     </span>
                   </div>
                   <div>
-                    <span className="text-[#9CA3AF]">GPU: </span>
-                    <span className="font-semibold text-white">
-                      {gpu || 'Não detectada'}
+                    <span className="text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+                      {t.community.gpu}:{' '}
+                    </span>
+                    <span className="font-semibold text-[#111827] dark:text-white">
+                      {gpu || t.community.notDetectedFem}
                     </span>
                   </div>
                   <div>
-                    <span className="text-[#9CA3AF]">RAM: </span>
-                    <span className="font-semibold text-white">
-                      {ram || 'Não detectada'}
+                    <span className="text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+                      {t.community.ram}:{' '}
+                    </span>
+                    <span className="font-semibold text-[#111827] dark:text-white">
+                      {ram || t.community.notDetectedFem}
                     </span>
                   </div>
                   <div className="col-span-2">
-                    <span className="text-[#9CA3AF]">Android: </span>
-                    <span className="font-semibold text-white">
-                      {androidVersao || 'Não detectado'}
+                    <span className="text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+                      {t.community.android}:{' '}
+                    </span>
+                    <span className="font-semibold text-[#111827] dark:text-white">
+                      {androidVersao || t.community.notDetected}
                     </span>
                   </div>
                 </div>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                   <label className="space-y-1">
-                    <span className="text-[11px] font-medium text-[#9CA3AF]">
-                      Modelo *
+                    <span className="text-[11px] font-medium text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+                      {t.community.modelFieldLabel}
                     </span>
                     <input
                       type="text"
@@ -965,13 +1073,13 @@ export function DeviceCompatibilitySection({
                           if (inferred) setMarca(inferred);
                         }
                       }}
-                      placeholder="Ex: Poco F5, Galaxy S23"
-                      className="w-full h-10 px-3 rounded-xl bg-[#1B1924] border border-[#2A2738] text-xs text-white placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1]"
+                      placeholder="Ex: OPPO A5 4G (CPH2727)"
+                      className="w-full h-10 px-3 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs text-[#111827] dark:text-white placeholder-[#9CA3AF] dark:placeholder-[#6B7280] purple:placeholder-[#C4B5FD]/60 focus:outline-none focus:border-[#6366F1] purple:focus:border-[#C084FC]"
                     />
                   </label>
 
                   <label className="space-y-1">
-                    <span className="text-[11px] font-medium text-[#9CA3AF]">
+                    <span className="text-[11px] font-medium text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
                       Chipset / Processador
                     </span>
                     <input
@@ -979,12 +1087,12 @@ export function DeviceCompatibilitySection({
                       value={chipset}
                       onChange={(e) => setChipset(e.target.value)}
                       placeholder="Ex: Snapdragon 7+ Gen 2"
-                      className="w-full h-10 px-3 rounded-xl bg-[#1B1924] border border-[#2A2738] text-xs text-white placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1]"
+                      className="w-full h-10 px-3 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs text-[#111827] dark:text-white placeholder-[#9CA3AF] dark:placeholder-[#6B7280] purple:placeholder-[#C4B5FD]/60 focus:outline-none focus:border-[#6366F1] purple:focus:border-[#C084FC]"
                     />
                   </label>
 
                   <label className="space-y-1">
-                    <span className="text-[11px] font-medium text-[#9CA3AF]">
+                    <span className="text-[11px] font-medium text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
                       GPU
                     </span>
                     <input
@@ -992,12 +1100,12 @@ export function DeviceCompatibilitySection({
                       value={gpu}
                       onChange={(e) => setGpu(e.target.value)}
                       placeholder="Ex: Adreno 725"
-                      className="w-full h-10 px-3 rounded-xl bg-[#1B1924] border border-[#2A2738] text-xs text-white placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1]"
+                      className="w-full h-10 px-3 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs text-[#111827] dark:text-white placeholder-[#9CA3AF] dark:placeholder-[#6B7280] purple:placeholder-[#C4B5FD]/60 focus:outline-none focus:border-[#6366F1] purple:focus:border-[#C084FC]"
                     />
                   </label>
 
                   <label className="space-y-1">
-                    <span className="text-[11px] font-medium text-[#9CA3AF]">
+                    <span className="text-[11px] font-medium text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
                       Memória RAM
                     </span>
                     <input
@@ -1005,12 +1113,12 @@ export function DeviceCompatibilitySection({
                       value={ram}
                       onChange={(e) => setRam(e.target.value)}
                       placeholder="Ex: 8 GB, 12 GB"
-                      className="w-full h-10 px-3 rounded-xl bg-[#1B1924] border border-[#2A2738] text-xs text-white placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1]"
+                      className="w-full h-10 px-3 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs text-[#111827] dark:text-white placeholder-[#9CA3AF] dark:placeholder-[#6B7280] purple:placeholder-[#C4B5FD]/60 focus:outline-none focus:border-[#6366F1] purple:focus:border-[#C084FC]"
                     />
                   </label>
 
                   <label className="sm:col-span-2 space-y-1">
-                    <span className="text-[11px] font-medium text-[#9CA3AF]">
+                    <span className="text-[11px] font-medium text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
                       Versão do Android
                     </span>
                     <input
@@ -1018,7 +1126,7 @@ export function DeviceCompatibilitySection({
                       value={androidVersao}
                       onChange={(e) => setAndroidVersao(e.target.value)}
                       placeholder="Ex: Android 14"
-                      className="w-full h-10 px-3 rounded-xl bg-[#1B1924] border border-[#2A2738] text-xs text-white placeholder-[#6B7280] focus:outline-none focus:border-[#6366F1]"
+                      className="w-full h-10 px-3 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs text-[#111827] dark:text-white placeholder-[#9CA3AF] dark:placeholder-[#6B7280] purple:placeholder-[#C4B5FD]/60 focus:outline-none focus:border-[#6366F1] purple:focus:border-[#C084FC]"
                     />
                   </label>
                 </div>
@@ -1028,11 +1136,11 @@ export function DeviceCompatibilitySection({
             {/* Brand Pills */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-white">
-                  Marca do aparelho
+                <label className="text-xs font-bold text-[#111827] dark:text-white">
+                  {t.community.brandLabel}
                 </label>
                 {marca && (
-                  <span className="text-[11px] font-semibold text-[#A5B4FC]">
+                  <span className="text-[11px] font-semibold text-[#4F46E5] dark:text-[#A5B4FC] purple:text-[#D8B4FE]">
                     {marca}
                   </span>
                 )}
@@ -1047,8 +1155,8 @@ export function DeviceCompatibilitySection({
                       onClick={() => setMarca(brand)}
                       className={`min-h-[36px] px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors ${
                         active
-                          ? 'bg-[#6366F1] border-[#8B5CF6] text-white shadow-sm shadow-[#6366F1]/30'
-                          : 'bg-[#0F0E13] border-[#2A2738] text-[#D1D5DB] hover:border-[#6366F1]/50'
+                          ? 'bg-[#6366F1] border-[#8B5CF6] purple:bg-[#9333EA] purple:border-[#C084FC] text-white shadow-sm shadow-[#6366F1]/30 purple:shadow-[#9333EA]/30'
+                          : 'bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[#374151] dark:text-[#D1D5DB] purple:text-[#DDD6FE] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60'
                       }`}
                     >
                       {brand}
@@ -1061,12 +1169,14 @@ export function DeviceCompatibilitySection({
             {/* FPS Pills (Optional) */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-white">
-                  FPS{' '}
-                  <span className="font-normal text-[#9CA3AF]">(opcional)</span>
+                <label className="text-xs font-bold text-[#111827] dark:text-white">
+                  {t.community.fpsLabel}{' '}
+                  <span className="font-normal text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+                    {t.community.optional}
+                  </span>
                 </label>
                 {fps !== null && (
-                  <span className="text-[11px] font-bold font-mono-nums text-[#A5B4FC]">
+                  <span className="text-[11px] font-bold font-mono-nums text-[#4F46E5] dark:text-[#A5B4FC] purple:text-[#D8B4FE]">
                     {fps} FPS
                   </span>
                 )}
@@ -1081,8 +1191,8 @@ export function DeviceCompatibilitySection({
                       onClick={() => setFps(active ? null : value)}
                       className={`min-h-[36px] px-3 py-1.5 rounded-full border text-xs font-semibold font-mono-nums transition-colors ${
                         active
-                          ? 'bg-[#6366F1] border-[#8B5CF6] text-white shadow-sm shadow-[#6366F1]/30'
-                          : 'bg-[#0F0E13] border-[#2A2738] text-[#D1D5DB] hover:border-[#6366F1]/50'
+                          ? 'bg-[#6366F1] border-[#8B5CF6] purple:bg-[#9333EA] purple:border-[#C084FC] text-white shadow-sm shadow-[#6366F1]/30 purple:shadow-[#9333EA]/30'
+                          : 'bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[#374151] dark:text-[#D1D5DB] purple:text-[#DDD6FE] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60'
                       }`}
                     >
                       {value} FPS
@@ -1093,13 +1203,13 @@ export function DeviceCompatibilitySection({
             </div>
 
             {/* Rating Slider 1 to 5 */}
-            <div className="space-y-2.5 rounded-2xl bg-[#0F0E13] border border-[#2A2738] p-4">
+            <div className="space-y-2.5 rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-4">
               <div className="flex items-center justify-between gap-2">
                 <label
                   htmlFor="nota-slider"
-                  className="text-xs font-bold text-white"
+                  className="text-xs font-bold text-[#111827] dark:text-white"
                 >
-                  Como rodou
+                  {t.community.howItRan}
                 </label>
                 <span
                   className={`inline-flex items-center px-2.5 py-0.5 rounded-lg border text-xs font-bold font-mono-nums ${getRatingStyles(
@@ -1118,16 +1228,16 @@ export function DeviceCompatibilitySection({
                 step={1}
                 value={nota}
                 onChange={(e) => setNota(Number(e.target.value))}
-                className="w-full accent-[#8B5CF6] cursor-pointer h-2 bg-[#1B1924] rounded-lg"
+                className="w-full accent-[#6366F1] dark:accent-[#8B5CF6] purple:accent-[#C084FC] cursor-pointer h-2 bg-white dark:bg-[#1B1924] purple:bg-[#20143A] rounded-lg"
               />
 
-              <div className="flex items-center justify-between text-[11px] text-[#9CA3AF]">
+              <div className="flex items-center justify-between text-[11px] text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
                 <button
                   type="button"
                   onClick={() => setNota(1)}
-                  className="hover:text-white transition-colors"
+                  className="hover:text-[#111827] dark:hover:text-white transition-colors"
                 >
-                  1 · Não roda
+                  1 · {t.community.doesNotRun}
                 </button>
                 <div className="flex items-center gap-2 font-mono-nums">
                   {[2, 3, 4].map((stepVal) => (
@@ -1137,8 +1247,8 @@ export function DeviceCompatibilitySection({
                       onClick={() => setNota(stepVal)}
                       className={`w-6 h-6 rounded-md text-xs font-semibold transition-colors ${
                         nota === stepVal
-                          ? 'bg-[#6366F1] text-white'
-                          : 'text-[#9CA3AF] hover:text-white'
+                          ? 'bg-[#6366F1] purple:bg-[#9333EA] text-white'
+                          : 'text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white'
                       }`}
                     >
                       {stepVal}
@@ -1148,9 +1258,9 @@ export function DeviceCompatibilitySection({
                 <button
                   type="button"
                   onClick={() => setNota(5)}
-                  className="hover:text-white transition-colors"
+                  className="hover:text-[#111827] dark:hover:text-white transition-colors"
                 >
-                  5 · Perfeito
+                  5 · {t.community.perfect}
                 </button>
               </div>
             </div>
@@ -1158,13 +1268,13 @@ export function DeviceCompatibilitySection({
             {/* Multi-select Observation Tags (max 6) */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
-                <label className="text-xs font-bold text-white">
-                  O que você notou?{' '}
-                  <span className="font-normal text-[#9CA3AF]">
-                    (opcional, até {MAX_TAGS})
+                <label className="text-xs font-bold text-[#111827] dark:text-white">
+                  {t.community.whatNoticed}{' '}
+                  <span className="font-normal text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+                    {t.community.upToSix}
                   </span>
                 </label>
-                <span className="text-[11px] font-mono-nums text-[#9CA3AF]">
+                <span className="text-[11px] font-mono-nums text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
                   {selectedTags.length}/{MAX_TAGS}
                 </span>
               </div>
@@ -1180,10 +1290,10 @@ export function DeviceCompatibilitySection({
                       onClick={() => handleToggleTag(tag)}
                       className={`min-h-[36px] px-3 py-1.5 rounded-full border text-xs font-semibold transition-colors ${
                         active
-                          ? 'bg-[#6366F1] border-[#8B5CF6] text-white shadow-sm shadow-[#6366F1]/30'
+                          ? 'bg-[#6366F1] border-[#8B5CF6] purple:bg-[#9333EA] purple:border-[#C084FC] text-white shadow-sm shadow-[#6366F1]/30 purple:shadow-[#9333EA]/30'
                           : reachedLimit
-                          ? 'bg-[#0F0E13]/50 border-[#2A2738]/60 text-[#6B7280] cursor-not-allowed'
-                          : 'bg-[#0F0E13] border-[#2A2738] text-[#D1D5DB] hover:border-[#6366F1]/50'
+                          ? 'bg-[#F4F5F9]/50 dark:bg-[#0F0E13]/50 purple:bg-[#170E2B]/50 border-[#E2E4EC]/60 dark:border-[#2A2738]/60 purple:border-[#392466]/60 text-[#9CA3AF] dark:text-[#6B7280] purple:text-[#C4B5FD]/40 cursor-not-allowed'
+                          : 'bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[#374151] dark:text-[#D1D5DB] purple:text-[#DDD6FE] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60'
                       }`}
                     >
                       {tag}
@@ -1194,7 +1304,7 @@ export function DeviceCompatibilitySection({
             </div>
 
             {submitError && (
-              <p className="text-xs text-rose-400 bg-rose-500/10 border border-rose-500/25 rounded-xl px-3 py-2">
+              <p className="text-xs text-rose-600 dark:text-rose-400 bg-rose-500/10 border border-rose-500/25 rounded-xl px-3 py-2">
                 {submitError}
               </p>
             )}
@@ -1203,9 +1313,15 @@ export function DeviceCompatibilitySection({
             <button
               type="submit"
               disabled={submitting}
-              className="w-full min-h-[48px] px-5 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] disabled:opacity-60 text-white text-sm font-bold shadow-lg shadow-[#6366F1]/30 active:scale-[0.99] transition-all"
+              className="w-full min-h-[48px] px-5 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] purple:from-[#7E22CE] purple:to-[#C026D3] purple:hover:from-[#6B21A8] purple:hover:to-[#A21CAF] disabled:opacity-60 text-white text-sm font-bold shadow-lg shadow-[#6366F1]/30 purple:shadow-[#9333EA]/30 active:scale-[0.99] transition-all"
             >
-              {submitting ? 'Enviando relato...' : 'Enviar relato'}
+              {submitting
+                ? editingRelatoId
+                  ? t.community.savingChanges
+                  : t.community.submittingReport
+                : editingRelatoId
+                ? t.community.saveChanges
+                : t.community.submitReport}
             </button>
           </form>
         </div>

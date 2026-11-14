@@ -17,6 +17,283 @@ interface NavigatorUAData {
   }>;
 }
 
+interface CommercialModelEntry {
+  name: string;
+  brand: string;
+}
+
+// Dicionário de códigos técnicos exatos -> Nome comercial e marca
+const EXACT_MODEL_DICTIONARY: Record<string, CommercialModelEntry> = {
+  // OPPO
+  CPH2727: { name: 'OPPO A5 4G', brand: 'OPPO' },
+  CPH2683: { name: 'OPPO A3 4G', brand: 'OPPO' },
+  CPH2669: { name: 'OPPO A40', brand: 'OPPO' },
+  CPH2639: { name: 'OPPO A60', brand: 'OPPO' },
+  CPH2659: { name: 'OPPO A80 5G', brand: 'OPPO' },
+  CPH2591: { name: 'OPPO Reno 11 F 5G', brand: 'OPPO' },
+  CPH2603: { name: 'OPPO Reno 11 5G', brand: 'OPPO' },
+  CPH2625: { name: 'OPPO Reno 12 5G', brand: 'OPPO' },
+  CPH2629: { name: 'OPPO Reno 12 F 5G', brand: 'OPPO' },
+  CPH2689: { name: 'OPPO Reno 13 F 5G', brand: 'OPPO' },
+  CPH2557: { name: 'OPPO A58', brand: 'OPPO' },
+  CPH2577: { name: 'OPPO A38', brand: 'OPPO' },
+  CPH2477: { name: 'OPPO A78 4G', brand: 'OPPO' },
+  CPH2565: { name: 'OPPO A79 5G', brand: 'OPPO' },
+  CPH2525: { name: 'OPPO Find N3 Flip', brand: 'OPPO' },
+  CPH2581: { name: 'OPPO Find X7 Ultra', brand: 'OPPO' },
+
+  // Xiaomi / Redmi / POCO
+  '2312DRA50G': { name: 'Redmi Note 13 Pro 5G', brand: 'Xiaomi' },
+  '2312DRA50I': { name: 'Redmi Note 13 Pro 5G', brand: 'Xiaomi' },
+  '23117RA68G': { name: 'Redmi Note 13 Pro 4G', brand: 'Xiaomi' },
+  '23090RA98G': { name: 'Redmi Note 13 Pro+ 5G', brand: 'Xiaomi' },
+  '23129RAA4G': { name: 'Redmi Note 13 4G', brand: 'Xiaomi' },
+  '23124RA7EO': { name: 'Redmi Note 13 5G', brand: 'Xiaomi' },
+  '24090RA29G': { name: 'Redmi Note 14 Pro 5G', brand: 'Xiaomi' },
+  '24094RAD4G': { name: 'Redmi Note 14 Pro+ 5G', brand: 'Xiaomi' },
+  '24117RN76G': { name: 'Redmi Note 14 4G', brand: 'Xiaomi' },
+  '24094RN2DG': { name: 'Redmi Note 14 5G', brand: 'Xiaomi' },
+  '22101316G': { name: 'Redmi Note 12 Pro 5G', brand: 'Xiaomi' },
+  '23021RAAEG': { name: 'Redmi Note 12 4G', brand: 'Xiaomi' },
+  '23028RA60L': { name: 'Redmi Note 12 4G', brand: 'Xiaomi' },
+  '22111317G': { name: 'Redmi Note 12S', brand: 'Xiaomi' },
+  '23076RN8DY': { name: 'Redmi 12 4G', brand: 'Xiaomi' },
+  '23106RN0DA': { name: 'Redmi 13C', brand: 'Xiaomi' },
+  '24049RN28L': { name: 'Redmi 13', brand: 'Xiaomi' },
+  '23124RN87G': { name: 'Redmi 13C', brand: 'Xiaomi' },
+  '2409BRN2CG': { name: 'Redmi 14C', brand: 'Xiaomi' },
+  '23049PCD8G': { name: 'POCO F5', brand: 'Xiaomi' },
+  '23013PC75G': { name: 'POCO F5 Pro', brand: 'Xiaomi' },
+  '24069PC21G': { name: 'POCO F6', brand: 'Xiaomi' },
+  '23113RKC6G': { name: 'POCO F6 Pro', brand: 'Xiaomi' },
+  '25053PC47G': { name: 'POCO F7', brand: 'Xiaomi' },
+  '24122RKC7G': { name: 'POCO F7 Pro', brand: 'Xiaomi' },
+  '22101320G': { name: 'POCO X5 Pro 5G', brand: 'Xiaomi' },
+  '22111317PG': { name: 'POCO X5 5G', brand: 'Xiaomi' },
+  '23122PCD1G': { name: 'POCO X6 5G', brand: 'Xiaomi' },
+  '2311DRK48G': { name: 'POCO X6 Pro 5G', brand: 'Xiaomi' },
+  '2412DPC0AG': { name: 'POCO X7 Pro', brand: 'Xiaomi' },
+  '24095PCADG': { name: 'POCO X7 5G', brand: 'Xiaomi' },
+  '23127PN0CG': { name: 'Xiaomi 14', brand: 'Xiaomi' },
+  '24030PN60G': { name: 'Xiaomi 14 Ultra', brand: 'Xiaomi' },
+  '2407FPN8EG': { name: 'Xiaomi 14T', brand: 'Xiaomi' },
+  '2407FPN8ER': { name: 'Xiaomi 14T Pro', brand: 'Xiaomi' },
+  '23078PND5G': { name: 'Xiaomi 13T', brand: 'Xiaomi' },
+  '2201116PG': { name: 'POCO X4 Pro 5G', brand: 'Xiaomi' },
+  '22021211RG': { name: 'POCO F4', brand: 'Xiaomi' },
+  '21121210G': { name: 'POCO F4 GT', brand: 'Xiaomi' },
+  M2102J20SG: { name: 'POCO X3 Pro', brand: 'Xiaomi' },
+  M2007J20CG: { name: 'POCO X3 NFC', brand: 'Xiaomi' },
+  M2012K11AG: { name: 'POCO F3', brand: 'Xiaomi' },
+  M2101K6G: { name: 'Redmi Note 10 Pro', brand: 'Xiaomi' },
+  M2101K7AG: { name: 'Redmi Note 10', brand: 'Xiaomi' },
+  '2201117TG': { name: 'Redmi Note 11', brand: 'Xiaomi' },
+  '2201116TG': { name: 'Redmi Note 11 Pro 5G', brand: 'Xiaomi' },
+  '2310FPCA4G': { name: 'POCO C65', brand: 'Xiaomi' },
+  '23095PC98G': { name: 'POCO M6 Pro', brand: 'Xiaomi' },
+  '2404APC5FG': { name: 'POCO M6', brand: 'Xiaomi' },
+  '22071219CG': { name: 'POCO M5', brand: 'Xiaomi' },
+
+  // OnePlus
+  CPH2449: { name: 'OnePlus 11 5G', brand: 'OnePlus' },
+  CPH2583: { name: 'OnePlus 12 5G', brand: 'OnePlus' },
+  CPH2611: { name: 'OnePlus 12R', brand: 'OnePlus' },
+  CPH2653: { name: 'OnePlus 13', brand: 'OnePlus' },
+  CPH2663: { name: 'OnePlus Nord 4', brand: 'OnePlus' },
+  CPH2493: { name: 'OnePlus Nord 3 5G', brand: 'OnePlus' },
+  CPH2465: { name: 'OnePlus Nord CE 3 Lite', brand: 'OnePlus' },
+  LE2125: { name: 'OnePlus 9 Pro', brand: 'OnePlus' },
+  NE2215: { name: 'OnePlus 10 Pro', brand: 'OnePlus' },
+
+  // Realme
+  RMX3706: { name: 'Realme GT Neo 5 SE', brand: 'Realme' },
+  RMX3851: { name: 'Realme GT 6', brand: 'Realme' },
+  RMX3853: { name: 'Realme GT 6T', brand: 'Realme' },
+  RMX3840: { name: 'Realme 12 Pro+ 5G', brand: 'Realme' },
+  RMX3842: { name: 'Realme 12 Pro 5G', brand: 'Realme' },
+  RMX3870: { name: 'Realme 12 5G', brand: 'Realme' },
+  RMX3930: { name: 'Realme C65', brand: 'Realme' },
+  RMX3760: { name: 'Realme C53', brand: 'Realme' },
+  RMX3710: { name: 'Realme C55', brand: 'Realme' },
+  RMX3830: { name: 'Realme C67', brand: 'Realme' },
+  RMX3941: { name: 'Realme C75', brand: 'Realme' },
+  RMX3370: { name: 'Realme GT Neo 2', brand: 'Realme' },
+  RMX3630: { name: 'Realme 10', brand: 'Realme' },
+  RMX3741: { name: 'Realme 11 Pro+ 5G', brand: 'Realme' },
+
+  // ASUS / ROG Phone
+  AI2401: { name: 'ASUS ROG Phone 8', brand: 'ASUS' },
+  AI2401_A: { name: 'ASUS ROG Phone 8 Pro', brand: 'ASUS' },
+  AI2501: { name: 'ASUS ROG Phone 9', brand: 'ASUS' },
+  AI2205: { name: 'ASUS ROG Phone 7', brand: 'ASUS' },
+  AI2201: { name: 'ASUS ROG Phone 6', brand: 'ASUS' },
+  AI2302: { name: 'ASUS Zenfone 10', brand: 'ASUS' },
+  ZS676KS: { name: 'ASUS ROG Phone 5s', brand: 'ASUS' },
+
+  // RedMagic / Nubia
+  NX769J: { name: 'RedMagic 9 Pro', brand: 'RedMagic' },
+  NX729J: { name: 'RedMagic 8 Pro', brand: 'RedMagic' },
+  NX789J: { name: 'RedMagic 10 Pro', brand: 'RedMagic' },
+  NX679J: { name: 'RedMagic 7', brand: 'RedMagic' },
+  NX709J: { name: 'RedMagic 7S Pro', brand: 'RedMagic' },
+  NX721J: { name: 'Nubia Z50 Ultra', brand: 'Nubia' },
+  NX727J: { name: 'Nubia Z60 Ultra', brand: 'Nubia' },
+
+  // Google Pixel
+  GC3VE: { name: 'Google Pixel 8 Pro', brand: 'Google Pixel' },
+  GKWS6: { name: 'Google Pixel 8', brand: 'Google Pixel' },
+  G9BQD: { name: 'Google Pixel 8a', brand: 'Google Pixel' },
+  GQML3: { name: 'Google Pixel 7 Pro', brand: 'Google Pixel' },
+  GVU6C: { name: 'Google Pixel 7', brand: 'Google Pixel' },
+  GUR25: { name: 'Google Pixel 9', brand: 'Google Pixel' },
+  GEC77: { name: 'Google Pixel 9 Pro XL', brand: 'Google Pixel' },
+
+  // Nothing
+  A063: { name: 'Nothing Phone (1)', brand: 'Nothing' },
+  A065: { name: 'Nothing Phone (2)', brand: 'Nothing' },
+  A142: { name: 'Nothing Phone (2a)', brand: 'Nothing' },
+
+  // Motorola
+  XT2401: { name: 'Motorola Edge 50 Ultra', brand: 'Motorola' },
+  XT2427: { name: 'Motorola Edge 50 Pro', brand: 'Motorola' },
+  XT2429: { name: 'Motorola Edge 50 Fusion', brand: 'Motorola' },
+  XT2409: { name: 'Motorola Edge 50 Neo', brand: 'Motorola' },
+  XT2301: { name: 'Motorola Edge 40 Pro', brand: 'Motorola' },
+  XT2303: { name: 'Motorola Edge 40', brand: 'Motorola' },
+  XT2305: { name: 'Motorola Edge 40 Neo', brand: 'Motorola' },
+  XT2203: { name: 'Motorola Edge 30 Fusion', brand: 'Motorola' },
+  XT2343: { name: 'Moto G84 5G', brand: 'Motorola' },
+  XT2437: { name: 'Moto G85 5G', brand: 'Motorola' },
+  XT2335: { name: 'Moto G54 5G', brand: 'Motorola' },
+  XT2433: { name: 'Moto G55 5G', brand: 'Motorola' },
+  XT2363: { name: 'Moto G34 5G', brand: 'Motorola' },
+  XT2415: { name: 'Moto G24', brand: 'Motorola' },
+  XT2237: { name: 'Moto G73 5G', brand: 'Motorola' },
+  XT2221: { name: 'Moto G82 5G', brand: 'Motorola' },
+  XT2175: { name: 'Moto G200 5G', brand: 'Motorola' },
+
+  // Infinix
+  X6833B: { name: 'Infinix Note 30', brand: 'Infinix' },
+  X6837: { name: 'Infinix GT 10 Pro', brand: 'Infinix' },
+  X6871: { name: 'Infinix GT 20 Pro', brand: 'Infinix' },
+  X6850: { name: 'Infinix Note 40 Pro', brand: 'Infinix' },
+  X6739: { name: 'Infinix Hot 40 Pro', brand: 'Infinix' },
+};
+
+// Prefixos comuns (Samsung Galaxy com variantes regionais B/E/U/W/N/0, Motorola, ASUS, RedMagic)
+const PREFIX_MODEL_DICTIONARY: Array<{
+  prefix: string;
+  name: string;
+  brand: string;
+}> = [
+  { prefix: 'SM-S938', name: 'Galaxy S25 Ultra', brand: 'Samsung' },
+  { prefix: 'SM-S936', name: 'Galaxy S25+', brand: 'Samsung' },
+  { prefix: 'SM-S931', name: 'Galaxy S25', brand: 'Samsung' },
+  { prefix: 'SM-S928', name: 'Galaxy S24 Ultra', brand: 'Samsung' },
+  { prefix: 'SM-S926', name: 'Galaxy S24+', brand: 'Samsung' },
+  { prefix: 'SM-S921', name: 'Galaxy S24', brand: 'Samsung' },
+  { prefix: 'SM-S918', name: 'Galaxy S23 Ultra', brand: 'Samsung' },
+  { prefix: 'SM-S916', name: 'Galaxy S23+', brand: 'Samsung' },
+  { prefix: 'SM-S911', name: 'Galaxy S23', brand: 'Samsung' },
+  { prefix: 'SM-S711', name: 'Galaxy S23 FE', brand: 'Samsung' },
+  { prefix: 'SM-S721', name: 'Galaxy S24 FE', brand: 'Samsung' },
+  { prefix: 'SM-S908', name: 'Galaxy S22 Ultra', brand: 'Samsung' },
+  { prefix: 'SM-S906', name: 'Galaxy S22+', brand: 'Samsung' },
+  { prefix: 'SM-S901', name: 'Galaxy S22', brand: 'Samsung' },
+  { prefix: 'SM-G998', name: 'Galaxy S21 Ultra', brand: 'Samsung' },
+  { prefix: 'SM-G996', name: 'Galaxy S21+', brand: 'Samsung' },
+  { prefix: 'SM-G991', name: 'Galaxy S21', brand: 'Samsung' },
+  { prefix: 'SM-G990', name: 'Galaxy S21 FE', brand: 'Samsung' },
+  { prefix: 'SM-G780', name: 'Galaxy S20 FE', brand: 'Samsung' },
+  { prefix: 'SM-G781', name: 'Galaxy S20 FE 5G', brand: 'Samsung' },
+  { prefix: 'SM-A566', name: 'Galaxy A56 5G', brand: 'Samsung' },
+  { prefix: 'SM-A556', name: 'Galaxy A55 5G', brand: 'Samsung' },
+  { prefix: 'SM-A546', name: 'Galaxy A54 5G', brand: 'Samsung' },
+  { prefix: 'SM-A536', name: 'Galaxy A53 5G', brand: 'Samsung' },
+  { prefix: 'SM-A528', name: 'Galaxy A52s 5G', brand: 'Samsung' },
+  { prefix: 'SM-A525', name: 'Galaxy A52', brand: 'Samsung' },
+  { prefix: 'SM-A366', name: 'Galaxy A36 5G', brand: 'Samsung' },
+  { prefix: 'SM-A356', name: 'Galaxy A35 5G', brand: 'Samsung' },
+  { prefix: 'SM-A346', name: 'Galaxy A34 5G', brand: 'Samsung' },
+  { prefix: 'SM-A336', name: 'Galaxy A33 5G', brand: 'Samsung' },
+  { prefix: 'SM-A256', name: 'Galaxy A25 5G', brand: 'Samsung' },
+  { prefix: 'SM-A245', name: 'Galaxy A24', brand: 'Samsung' },
+  { prefix: 'SM-A165', name: 'Galaxy A16 4G', brand: 'Samsung' },
+  { prefix: 'SM-A166', name: 'Galaxy A16 5G', brand: 'Samsung' },
+  { prefix: 'SM-A155', name: 'Galaxy A15 4G', brand: 'Samsung' },
+  { prefix: 'SM-A156', name: 'Galaxy A15 5G', brand: 'Samsung' },
+  { prefix: 'SM-A145', name: 'Galaxy A14 4G', brand: 'Samsung' },
+  { prefix: 'SM-A146', name: 'Galaxy A14 5G', brand: 'Samsung' },
+  { prefix: 'SM-A057', name: 'Galaxy A05s', brand: 'Samsung' },
+  { prefix: 'SM-M546', name: 'Galaxy M54 5G', brand: 'Samsung' },
+  { prefix: 'SM-M556', name: 'Galaxy M55 5G', brand: 'Samsung' },
+  { prefix: 'SM-M356', name: 'Galaxy M35 5G', brand: 'Samsung' },
+  { prefix: 'SM-M346', name: 'Galaxy M34 5G', brand: 'Samsung' },
+  { prefix: 'SM-M156', name: 'Galaxy M15 5G', brand: 'Samsung' },
+  { prefix: 'SM-M146', name: 'Galaxy M14 5G', brand: 'Samsung' },
+  { prefix: 'SM-F946', name: 'Galaxy Z Fold 5', brand: 'Samsung' },
+  { prefix: 'SM-F956', name: 'Galaxy Z Fold 6', brand: 'Samsung' },
+  { prefix: 'SM-F731', name: 'Galaxy Z Flip 5', brand: 'Samsung' },
+  { prefix: 'SM-F741', name: 'Galaxy Z Flip 6', brand: 'Samsung' },
+  { prefix: 'SM-X910', name: 'Galaxy Tab S9 Ultra', brand: 'Samsung' },
+  { prefix: 'SM-X810', name: 'Galaxy Tab S9+', brand: 'Samsung' },
+  { prefix: 'SM-X710', name: 'Galaxy Tab S9', brand: 'Samsung' },
+  { prefix: 'SM-X510', name: 'Galaxy Tab S9 FE', brand: 'Samsung' },
+  { prefix: 'SM-X210', name: 'Galaxy Tab A9+', brand: 'Samsung' },
+  { prefix: 'XT2401', name: 'Motorola Edge 50 Ultra', brand: 'Motorola' },
+  { prefix: 'XT2427', name: 'Motorola Edge 50 Pro', brand: 'Motorola' },
+  { prefix: 'XT2429', name: 'Motorola Edge 50 Fusion', brand: 'Motorola' },
+  { prefix: 'XT2409', name: 'Motorola Edge 50 Neo', brand: 'Motorola' },
+  { prefix: 'XT2301', name: 'Motorola Edge 40 Pro', brand: 'Motorola' },
+  { prefix: 'XT2303', name: 'Motorola Edge 40', brand: 'Motorola' },
+  { prefix: 'XT2343', name: 'Moto G84 5G', brand: 'Motorola' },
+  { prefix: 'XT2437', name: 'Moto G85 5G', brand: 'Motorola' },
+  { prefix: 'XT2335', name: 'Moto G54 5G', brand: 'Motorola' },
+  { prefix: 'XT2433', name: 'Moto G55 5G', brand: 'Motorola' },
+  { prefix: 'XT2363', name: 'Moto G34 5G', brand: 'Motorola' },
+  { prefix: 'NX789J', name: 'RedMagic 10 Pro', brand: 'RedMagic' },
+  { prefix: 'NX769J', name: 'RedMagic 9 Pro', brand: 'RedMagic' },
+  { prefix: 'NX729J', name: 'RedMagic 8 Pro', brand: 'RedMagic' },
+  { prefix: 'AI2501', name: 'ASUS ROG Phone 9', brand: 'ASUS' },
+  { prefix: 'AI2401', name: 'ASUS ROG Phone 8', brand: 'ASUS' },
+  { prefix: 'AI2205', name: 'ASUS ROG Phone 7', brand: 'ASUS' },
+  { prefix: 'AI2201', name: 'ASUS ROG Phone 6', brand: 'ASUS' },
+];
+
+export function resolveCommercialModelName(rawModel: string): {
+  displayName: string;
+  brand: string;
+} {
+  const trimmed = rawModel.trim();
+  if (!trimmed) {
+    return { displayName: '', brand: '' };
+  }
+
+  const upper = trimmed.toUpperCase();
+
+  const exact = EXACT_MODEL_DICTIONARY[upper];
+  if (exact) {
+    const displayName = upper.includes(exact.name.toUpperCase())
+      ? trimmed
+      : `${exact.name} (${trimmed})`;
+    return { displayName, brand: exact.brand };
+  }
+
+  for (const entry of PREFIX_MODEL_DICTIONARY) {
+    if (upper.startsWith(entry.prefix)) {
+      const displayName = upper.includes(entry.name.toUpperCase())
+        ? trimmed
+        : `${entry.name} (${trimmed})`;
+      return { displayName, brand: entry.brand };
+    }
+  }
+
+  return {
+    displayName: trimmed,
+    brand: inferBrandFromModel(trimmed),
+  };
+}
+
 function cleanWebGLRenderer(raw: string): string {
   let cleaned = raw.trim();
   const angleMatch = cleaned.match(/^ANGLE\s*\((.+)\)$/i);
@@ -212,8 +489,12 @@ function parseUserAgentFallback(ua: string): {
     }
   }
 
-  if (!marca && modelo) {
-    marca = inferBrandFromModel(modelo);
+  if (modelo) {
+    const resolved = resolveCommercialModelName(modelo);
+    modelo = resolved.displayName;
+    if (resolved.brand) {
+      marca = resolved.brand;
+    }
   }
 
   return { modelo, androidVersao, marca };
@@ -221,10 +502,13 @@ function parseUserAgentFallback(ua: string): {
 
 export async function detectCurrentDevice(): Promise<DetectedDeviceInfo> {
   const ua = typeof navigator !== 'undefined' ? navigator.userAgent : '';
-  const nav = typeof navigator !== 'undefined' ? (navigator as Navigator & {
-    deviceMemory?: number;
-    userAgentData?: NavigatorUAData;
-  }) : undefined;
+  const nav =
+    typeof navigator !== 'undefined'
+      ? (navigator as Navigator & {
+          deviceMemory?: number;
+          userAgentData?: NavigatorUAData;
+        })
+      : undefined;
 
   const fallback = parseUserAgentFallback(ua);
   let modelo = fallback.modelo;
@@ -239,17 +523,17 @@ export async function detectCurrentDevice(): Promise<DetectedDeviceInfo> {
         'platformVersion',
       ]);
       if (hints.model && hints.model.trim()) {
-        modelo = hints.model.trim();
+        const resolved = resolveCommercialModelName(hints.model.trim());
+        modelo = resolved.displayName;
+        if (resolved.brand) {
+          marca = resolved.brand;
+        }
       }
       if (hints.platform?.toLowerCase() === 'android' && hints.platformVersion) {
         const major = hints.platformVersion.split('.')[0];
         if (major && Number(major) > 0) {
           androidVersao = `Android ${hints.platformVersion.replace(/\.0\.0$/, '')}`;
         }
-      }
-      if (modelo) {
-        const inferred = inferBrandFromModel(modelo);
-        if (inferred) marca = inferred;
       }
     } catch {
       // Ignore Client Hints permission/availability errors
