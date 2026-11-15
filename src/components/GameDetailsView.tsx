@@ -16,6 +16,7 @@ import {
   Zap,
 } from 'lucide-react';
 import { usePreferences } from '../context/PreferencesContext';
+import { copyTextToClipboard } from '../services/downloadEngine';
 import type { DownloadTask, Jogo, JogoArquivo } from '../types/game';
 import {
   buildDownloadTaskId,
@@ -68,27 +69,10 @@ export function GameDetailsView({
   const hasAnyTorrent = files.some((item) => Boolean(item.torrent_url?.trim()));
 
   const copyToClipboard = async (text: string, key: string) => {
-    const trimmed = text.trim();
-    if (!trimmed) return;
-    try {
-      await navigator.clipboard.writeText(trimmed);
-      setCopiedKey(key);
-      setTimeout(() => setCopiedKey((prev) => (prev === key ? null : prev)), 2000);
-    } catch {
-      const textarea = document.createElement('textarea');
-      textarea.value = trimmed;
-      textarea.style.position = 'fixed';
-      textarea.style.opacity = '0';
-      document.body.appendChild(textarea);
-      textarea.select();
-      try {
-        document.execCommand('copy');
-        setCopiedKey(key);
-        setTimeout(() => setCopiedKey((prev) => (prev === key ? null : prev)), 2000);
-      } finally {
-        document.body.removeChild(textarea);
-      }
-    }
+    const ok = await copyTextToClipboard(text);
+    if (!ok) return;
+    setCopiedKey(key);
+    setTimeout(() => setCopiedKey((prev) => (prev === key ? null : prev)), 2000);
   };
 
   return (
@@ -231,7 +215,7 @@ export function GameDetailsView({
                           </div>
                         </div>
 
-                        {/* Side-by-side Download Direto + Baixar P2P + Copiar Link P2P */}
+                        {/* Side-by-side Download Direto + Baixar P2P */}
                         <div className="flex flex-wrap items-center gap-2">
                           {directUrl && (
                             <button
@@ -258,50 +242,56 @@ export function GameDetailsView({
                           )}
 
                           {fileTorrentUrl && (
-                            <>
-                              <button
-                                type="button"
-                                onClick={() =>
-                                  isP2PRedirected && p2pTask
-                                    ? onRetryDownload(p2pTask)
-                                    : onStartP2PDownload(jogo, arquivo, index)
-                                }
-                                className="flex-1 min-w-[125px] min-h-[44px] px-3.5 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] purple:from-[#7E22CE] purple:to-[#C026D3] purple:hover:from-[#6B21A8] purple:hover:to-[#A21CAF] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 shadow-md shadow-[#6366F1]/25 purple:shadow-[#9333EA]/30 active:scale-[0.98] transition-all"
-                              >
-                                {isP2PRedirected ? (
-                                  <>
-                                    <RotateCcw className="w-4 h-4 shrink-0" />
-                                    <span>{t.details.downloadAgain}</span>
-                                  </>
-                                ) : (
-                                  <>
-                                    <Zap className="w-4 h-4 shrink-0" />
-                                    <span>{t.details.downloadP2P}</span>
-                                  </>
-                                )}
-                              </button>
-
-                              <button
-                                type="button"
-                                onClick={() => copyToClipboard(fileTorrentUrl, taskId)}
-                                aria-label={`${t.details.copyP2P} (${arquivo.nome})`}
-                                title={t.details.copyP2P}
-                                className="min-h-[44px] min-w-[44px] px-3 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 text-[#111827] dark:text-white text-xs font-semibold inline-flex items-center justify-center gap-1.5 transition-colors shrink-0"
-                              >
-                                {copiedKey === taskId ? (
-                                  <>
-                                    <Check className="w-4 h-4 text-emerald-500 shrink-0" />
-                                    <span className="text-emerald-600 dark:text-emerald-400 hidden sm:inline">
-                                      {t.details.copied}
-                                    </span>
-                                  </>
-                                ) : (
-                                  <Copy className="w-4 h-4 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0" />
-                                )}
-                              </button>
-                            </>
+                            <button
+                              type="button"
+                              onClick={() =>
+                                isP2PRedirected && p2pTask
+                                  ? onRetryDownload(p2pTask)
+                                  : onStartP2PDownload(jogo, arquivo, index)
+                              }
+                              className="flex-1 min-w-[125px] min-h-[44px] px-3.5 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] purple:from-[#7E22CE] purple:to-[#C026D3] purple:hover:from-[#6B21A8] purple:hover:to-[#A21CAF] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-1.5 shadow-md shadow-[#6366F1]/25 purple:shadow-[#9333EA]/30 active:scale-[0.98] transition-all"
+                            >
+                              {isP2PRedirected ? (
+                                <>
+                                  <RotateCcw className="w-4 h-4 shrink-0" />
+                                  <span>{t.details.downloadAgain}</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Zap className="w-4 h-4 shrink-0" />
+                                  <span>{t.details.downloadP2P}</span>
+                                </>
+                              )}
+                            </button>
                           )}
                         </div>
+
+                        {fileTorrentUrl && (
+                          <div className="flex flex-wrap items-center justify-between gap-2 pt-0.5">
+                            <p className="text-[11px] text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] leading-snug">
+                              {t.details.copyMagnetHint}
+                            </p>
+                            <button
+                              type="button"
+                              onClick={() => void copyToClipboard(fileTorrentUrl, taskId)}
+                              className="min-h-[32px] px-2.5 py-1 rounded-lg bg-white/80 dark:bg-[#1B1924]/90 purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 text-[11px] font-semibold text-[#525866] dark:text-[#D1D5DB] purple:text-[#DDD6FE] hover:text-[#111827] dark:hover:text-white inline-flex items-center gap-1.5 transition-colors shrink-0"
+                            >
+                              {copiedKey === taskId ? (
+                                <>
+                                  <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                                  <span className="text-emerald-600 dark:text-emerald-400">
+                                    {t.details.copied}
+                                  </span>
+                                </>
+                              ) : (
+                                <>
+                                  <Copy className="w-3.5 h-3.5 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0" />
+                                  <span>{t.details.copyMagnet}</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+                        )}
 
                         {isAnyRedirected && (
                           <div className="flex items-center gap-1.5 text-xs text-emerald-600 dark:text-emerald-400/90 pt-0.5">

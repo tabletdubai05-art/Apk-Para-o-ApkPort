@@ -70,6 +70,108 @@ jobs:
             }
           '
 
+      - name: Configurar Intent Handler P2P na MainActivity
+        run: |
+          cat << 'EOF' > android/app/src/main/java/com/droidport/store/MainActivity.java
+          package com.droidport.store;
+
+          import android.content.ActivityNotFoundException;
+          import android.content.Context;
+          import android.content.Intent;
+          import android.content.pm.PackageManager;
+          import android.content.pm.ResolveInfo;
+          import android.net.Uri;
+          import android.webkit.WebResourceRequest;
+          import android.webkit.WebView;
+
+          import com.getcapacitor.BridgeActivity;
+          import com.getcapacitor.BridgeWebViewClient;
+
+          import java.net.URISyntaxException;
+
+          public class MainActivity extends BridgeActivity {
+              private boolean customWebViewClientConfigured = false;
+
+              @Override
+              public void onResume() {
+                  super.onResume();
+                  if (!customWebViewClientConfigured && getBridge() != null && getBridge().getWebView() != null) {
+                      customWebViewClientConfigured = true;
+                      getBridge().getWebView().setWebViewClient(new BridgeWebViewClient(getBridge()) {
+                          @Override
+                          public boolean shouldOverrideUrlLoading(WebView view, WebResourceRequest request) {
+                              if (request != null && request.getUrl() != null) {
+                                  if (handleExternalOrIntentUrl(view, request.getUrl().toString())) {
+                                      return true;
+                                  }
+                              }
+                              return super.shouldOverrideUrlLoading(view, request);
+                          }
+
+                          @Override
+                          public boolean shouldOverrideUrlLoading(WebView view, String url) {
+                              if (handleExternalOrIntentUrl(view, url)) {
+                                  return true;
+                              }
+                              return super.shouldOverrideUrlLoading(view, url);
+                          }
+                      });
+                  }
+              }
+
+              private boolean handleExternalOrIntentUrl(WebView view, String url) {
+                  if (url == null) return false;
+                  if (url.startsWith("intent://") || url.startsWith("intent:")) {
+                      try {
+                          Context context = view.getContext();
+                          Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
+                          if (intent != null) {
+                              String dataStr = intent.getDataString();
+                              if (dataStr != null && dataStr.startsWith("magnet://?")) {
+                                  intent.setData(Uri.parse("magnet:?" + dataStr.substring("magnet://?".length())));
+                              }
+                              intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                              PackageManager pm = context.getPackageManager();
+                              ResolveInfo info = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
+                              if (info != null) {
+                                  context.startActivity(intent);
+                                  return true;
+                              }
+                              String fallbackUrl = intent.getStringExtra("browser_fallback_url");
+                              if (fallbackUrl != null && !fallbackUrl.isEmpty()) {
+                                  Intent fallbackIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(fallbackUrl));
+                                  fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                                  context.startActivity(fallbackIntent);
+                                  return true;
+                              }
+                          }
+                      } catch (URISyntaxException | ActivityNotFoundException ignored) {
+                      }
+                      return true;
+                  }
+                  if (url.startsWith("magnet:")) {
+                      try {
+                          Context context = view.getContext();
+                          Intent magnetIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
+                          magnetIntent.setPackage("org.proninyaroslav.libretorrent");
+                          magnetIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                          if (context.getPackageManager().resolveActivity(magnetIntent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
+                              context.startActivity(magnetIntent);
+                          } else {
+                              Intent storeIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=org.proninyaroslav.libretorrent"));
+                              storeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                              context.startActivity(storeIntent);
+                          }
+                          return true;
+                      } catch (ActivityNotFoundException ignored) {
+                          return true;
+                      }
+                  }
+                  return false;
+              }
+          }
+          EOF
+
       - name: Substituir icone do Android pelo icon.png
         run: |
           mkdir -p assets

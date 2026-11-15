@@ -80,6 +80,43 @@ function isValidHttpUrl(value: unknown): value is string {
   }
 }
 
+function normalizeDiscordUrl(value: unknown): string | null {
+  if (typeof value !== 'string') return null;
+  let trimmed = value.trim();
+  if (!trimmed) return null;
+  if (/^(?:www\.)?discord\.(?:gg|com)\//i.test(trimmed)) {
+    trimmed = `https://${trimmed}`;
+  }
+  return isValidHttpUrl(trimmed) ? trimmed : null;
+}
+
+function extractDiscordUrlFromRow(row: unknown): string | null {
+  if (!row || typeof row !== 'object') return null;
+  const record = row as Record<string, unknown>;
+  const preferredKeys = [
+    'link',
+    'url',
+    'discord',
+    'link_discord',
+    'discord_url',
+    'convite',
+    'invite',
+  ];
+  for (const key of preferredKeys) {
+    const normalized = normalizeDiscordUrl(record[key]);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  for (const value of Object.values(record)) {
+    const normalized = normalizeDiscordUrl(value);
+    if (normalized) {
+      return normalized;
+    }
+  }
+  return null;
+}
+
 function isRemoteVersionGreater(
   remoteVersion: string,
   currentVersion: string
@@ -168,6 +205,8 @@ export default function App() {
   const [availableUpdate, setAvailableUpdate] = useState<AppUpdateInfo | null>(
     null
   );
+  const [discordUrl, setDiscordUrl] = useState<string | null>(null);
+  const [discordLoadError, setDiscordLoadError] = useState(false);
   const [communityLoggedIn, setCommunityLoggedIn] = useState(false);
   const [autoOpenReportGameId, setAutoOpenReportGameId] = useState<string | null>(
     null
@@ -293,7 +332,19 @@ export default function App() {
           id?: string | number | null;
           versao_atual?: string | number | null;
           link_apk?: string | null;
+          discord?: string | null;
+          link_discord?: string | null;
+          discord_url?: string | null;
         };
+
+        const configDiscord =
+          (isValidHttpUrl(row.discord) && row.discord.trim()) ||
+          (isValidHttpUrl(row.link_discord) && row.link_discord.trim()) ||
+          (isValidHttpUrl(row.discord_url) && row.discord_url.trim()) ||
+          null;
+        if (configDiscord) {
+          setDiscordUrl((prev) => prev || configDiscord);
+        }
 
         const rawRemoteVersion = row.versao_atual;
         const versaoAtual =
@@ -388,7 +439,15 @@ export default function App() {
         throw new Error(supabaseError.message);
       }
 
-      setJogos((data as Jogo[]) || []);
+      const loadedJogos = (data as Jogo[]) || [];
+      setJogos(loadedJogos);
+
+      for (const item of loadedJogos) {
+        if (isValidHttpUrl(item.discord)) {
+          setDiscordUrl((prev) => prev || item.discord!.trim());
+          break;
+        }
+      }
     } catch (err) {
       const msg =
         err instanceof Error
@@ -403,6 +462,63 @@ export default function App() {
   useEffect(() => {
     void fetchJogos();
   }, [fetchJogos]);
+
+  // Fetch official Discord invite link (most recent row) from Supabase `public.discord` table
+  const fetchDiscordLink = useCallback(async () => {
+    try {
+      let rows: unknown[] | null = null;
+      let queryError: unknown = null;
+
+      const orderedRes = await supabase
+        .from('discord')
+        .select('id, created_at, link')
+        .order('created_at', { ascending: false })
+        .order('id', { ascending: false })
+        .limit(5);
+
+      if (!orderedRes.error) {
+        rows = orderedRes.data;
+      } else {
+        const fallbackRes = await supabase
+          .from('discord')
+          .select('*')
+          .limit(10);
+        rows = fallbackRes.data;
+        queryError = fallbackRes.error;
+      }
+
+      if (queryError) {
+        setDiscordLoadError(true);
+        return;
+      }
+
+      setDiscordLoadError(false);
+
+      if (!rows || rows.length === 0) {
+        return;
+      }
+
+      for (const row of rows) {
+        const found = extractDiscordUrlFromRow(row);
+        if (found) {
+          setDiscordUrl(found);
+          return;
+        }
+      }
+    } catch {
+      setDiscordLoadError(true);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchDiscordLink();
+  }, [fetchDiscordLink]);
+
+  useEffect(() => {
+    if (activeTab === 'configuracoes') {
+      void fetchDiscordLink();
+    }
+  }, [activeTab, fetchDiscordLink]);
 
   // Restore persisted downloads from IndexedDB on mount
   useEffect(() => {
@@ -1059,9 +1175,11 @@ export default function App() {
         {/* Top Brand Row */}
         <header className="flex items-center justify-between gap-4">
           <div className="flex items-center gap-2.5 min-w-0">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-br from-[#6366F1] to-[#8B5CF6] purple:from-[#7E22CE] purple:to-[#C026D3] flex items-center justify-center shrink-0">
-              <Gamepad2 className="w-5 h-5 text-white" />
-            </div>
+            <img
+              src="/icon.png"
+              alt="DroidPort Store"
+              className="w-9 h-9 rounded-xl object-cover shrink-0 border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466]"
+            />
             <h1 className="text-lg sm:text-xl font-extrabold tracking-tight text-[#111827] dark:text-white truncate">
               DroidPort Store
             </h1>
@@ -1205,6 +1323,8 @@ export default function App() {
             </h2>
             <SettingsView
               appVersion={APP_VERSION}
+              discordUrl={discordUrl}
+              discordLoadError={discordLoadError}
               favoritesCount={favorites.length}
               downloadsCount={downloadList.length}
               onCheckUpdatesNow={() => checkForUpdatesNow(true)}

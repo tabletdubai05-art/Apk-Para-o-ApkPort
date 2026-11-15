@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core';
 import { Browser } from '@capacitor/browser';
 import type { DownloadTask } from '../types/game';
 import {
@@ -94,22 +95,79 @@ async function openUrlInSystemBrowser(url: string): Promise<void> {
   }
 }
 
+const LIBRETORRENT_PACKAGE = 'org.proninyaroslav.libretorrent';
+export const LIBRETORRENT_PLAY_STORE_URL =
+  'https://play.google.com/store/apps/details?id=org.proninyaroslav.libretorrent';
+
+export function isAndroidDevice(): boolean {
+  if (Capacitor.getPlatform() === 'android') {
+    return true;
+  }
+  if (typeof navigator !== 'undefined') {
+    return /android/i.test(navigator.userAgent);
+  }
+  return false;
+}
+
+export function buildAndroidP2PIntentUrl(rawUrl: string): string {
+  const trimmed = rawUrl.trim();
+  const encodedFallback = encodeURIComponent(LIBRETORRENT_PLAY_STORE_URL);
+
+  if (/^magnet:/i.test(trimmed)) {
+    const magnetPayload = trimmed.replace(/^magnet:(\/\/)?/i, '');
+    return `intent://${magnetPayload}#Intent;scheme=magnet;package=${LIBRETORRENT_PACKAGE};S.browser_fallback_url=${encodedFallback};end`;
+  }
+
+  if (/^https:\/\//i.test(trimmed)) {
+    const urlWithoutHttps = trimmed.replace(/^https:\/\//i, '');
+    return `intent://${urlWithoutHttps}#Intent;scheme=https;type=application/x-bittorrent;package=${LIBRETORRENT_PACKAGE};S.browser_fallback_url=${encodedFallback};end`;
+  }
+
+  if (/^http:\/\//i.test(trimmed)) {
+    const urlWithoutHttp = trimmed.replace(/^http:\/\//i, '');
+    return `intent://${urlWithoutHttp}#Intent;scheme=http;type=application/x-bittorrent;package=${LIBRETORRENT_PACKAGE};S.browser_fallback_url=${encodedFallback};end`;
+  }
+
+  return trimmed;
+}
+
+export async function copyTextToClipboard(text: string): Promise<boolean> {
+  const trimmed = text.trim();
+  if (!trimmed) return false;
+
+  try {
+    await navigator.clipboard.writeText(trimmed);
+    return true;
+  } catch {
+    const textarea = document.createElement('textarea');
+    textarea.value = trimmed;
+    textarea.style.position = 'fixed';
+    textarea.style.opacity = '0';
+    document.body.appendChild(textarea);
+    textarea.select();
+    try {
+      return document.execCommand('copy');
+    } catch {
+      return false;
+    } finally {
+      document.body.removeChild(textarea);
+    }
+  }
+}
+
 export function openP2PIntent(targetUrl?: string | null): void {
   if (!targetUrl) return;
   const trimmed = targetUrl.trim();
   if (!trimmed) return;
 
-  if (/^https:\/\//i.test(trimmed)) {
-    const urlWithoutHttps = trimmed.replace(/^https:\/\//i, '');
-    const intentUrl = `intent://${urlWithoutHttps}#Intent;scheme=https;type=application/x-bittorrent;package=org.proninyaroslav.libretorrent;end`;
+  if (isAndroidDevice()) {
+    const intentUrl = buildAndroidP2PIntentUrl(trimmed);
     window.location.href = intentUrl;
     return;
   }
 
-  if (/^http:\/\//i.test(trimmed)) {
-    const urlWithoutHttp = trimmed.replace(/^http:\/\//i, '');
-    const intentUrl = `intent://${urlWithoutHttp}#Intent;scheme=http;type=application/x-bittorrent;package=org.proninyaroslav.libretorrent;end`;
-    window.location.href = intentUrl;
+  if (/^https?:\/\//i.test(trimmed)) {
+    window.open(trimmed, '_blank', 'noopener,noreferrer');
     return;
   }
 

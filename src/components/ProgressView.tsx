@@ -1,5 +1,7 @@
-import { Clock, Download, History, Trash2, Zap } from 'lucide-react';
+import { useState } from 'react';
+import { Check, Clock, Copy, Download, History, Trash2, Zap } from 'lucide-react';
 import { usePreferences } from '../context/PreferencesContext';
+import { copyTextToClipboard } from '../services/downloadEngine';
 import type { DownloadMethod, DownloadTask } from '../types/game';
 import { formatHistoryDateTime } from '../utils/formatters';
 import { GameCover } from './GameCover';
@@ -16,6 +18,14 @@ export function ProgressView({
   onRemoveFinished,
 }: ProgressViewProps) {
   const { t } = usePreferences();
+  const [copiedTaskId, setCopiedTaskId] = useState<string | null>(null);
+
+  const handleCopyMagnet = async (torrentUrl: string, taskId: string) => {
+    const ok = await copyTextToClipboard(torrentUrl);
+    if (!ok) return;
+    setCopiedTaskId(taskId);
+    setTimeout(() => setCopiedTaskId((prev) => (prev === taskId ? null : prev)), 2000);
+  };
 
   if (tasks.length === 0) {
     return (
@@ -112,6 +122,30 @@ export function ProgressView({
                     </button>
                   )}
                 </div>
+
+                {torrentUrl && (
+                  <div className="flex justify-end">
+                    <button
+                      type="button"
+                      onClick={() => void handleCopyMagnet(torrentUrl, task.taskId)}
+                      className="min-h-[32px] px-2.5 py-1 rounded-lg bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 text-[11px] font-semibold text-[#525866] dark:text-[#D1D5DB] purple:text-[#DDD6FE] hover:text-[#111827] dark:hover:text-white inline-flex items-center gap-1.5 transition-colors"
+                    >
+                      {copiedTaskId === task.taskId ? (
+                        <>
+                          <Check className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
+                          <span className="text-emerald-600 dark:text-emerald-400">
+                            {t.details.copied}
+                          </span>
+                        </>
+                      ) : (
+                        <>
+                          <Copy className="w-3.5 h-3.5 text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0" />
+                          <span>{t.history.copyMagnet}</span>
+                        </>
+                      )}
+                    </button>
+                  </div>
+                )}
               </div>
             )}
           </article>

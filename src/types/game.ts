@@ -25,6 +25,7 @@ export interface Jogo {
   webseed_url?: string | null;
   arquivos?: JogoArquivo[] | string | null;
   tutoriais?: string | TutorialItem[] | null;
+  discord?: string | null;
   created_at?: string;
 }
 

@@ -58,6 +58,7 @@ export interface AppTranslations {
     downloadAgain: string;
     direct: string;
     p2p: string;
+    copyMagnet: string;
   };
   settings: {
     title: string;
@@ -89,6 +90,11 @@ export interface AppTranslations {
     libreTorrentTitle: string;
     libreTorrentDesc: string;
     libreTorrentAction: string;
+    discordTitle: string;
+    discordDesc: string;
+    discordAction: string;
+    discordUnavailable: string;
+    discordErrorHint: string;
     storageSectionTitle: string;
     clearHistoryTitle: string;
     clearHistoryDesc: string;
@@ -118,6 +124,8 @@ export interface AppTranslations {
     downloadAgain: string;
     copied: string;
     copyP2P: string;
+    copyMagnet: string;
+    copyMagnetHint: string;
     redirectedNotice: string;
     maxSpeedTipTitle: string;
     maxSpeedTipBody: string;
@@ -227,6 +235,7 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       downloadAgain: 'Baixar novamente',
       direct: 'Direto',
       p2p: 'P2P',
+      copyMagnet: 'Copiar Link Magnet',
     },
     settings: {
       title: 'Configurações',
@@ -260,6 +269,11 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       libreTorrentDesc:
         'Necessário para baixar jogos pesados em velocidade máxima pelo botão P2P.',
       libreTorrentAction: 'Instalar',
+      discordTitle: 'Entrar no Discord Oficial',
+      discordDesc: 'Tire dúvidas, reporte bugs e peça novos ports',
+      discordAction: 'Entrar no Discord Oficial',
+      discordUnavailable: 'Indisponível no momento',
+      discordErrorHint: 'Não foi possível carregar o convite do Discord agora.',
       storageSectionTitle: 'Armazenamento e Dados',
       clearHistoryTitle: 'Limpar histórico de downloads',
       clearHistoryDesc: 'Remove registros salvos no histórico local',
@@ -290,6 +304,9 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       downloadAgain: 'Baixar novamente',
       copied: 'Copiado',
       copyP2P: 'Copiar link P2P',
+      copyMagnet: 'Copiar Link Magnet',
+      copyMagnetHint:
+        'Caso o sistema bloqueie a abertura automática, copie o link e cole no LibreTorrent.',
       redirectedNotice: 'Redirecionado para o gerenciador de downloads do dispositivo',
       maxSpeedTipTitle: 'Dica para velocidade máxima:',
       maxSpeedTipBody:
@@ -400,6 +417,7 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       downloadAgain: 'Download again',
       direct: 'Direct',
       p2p: 'P2P',
+      copyMagnet: 'Copy Magnet Link',
     },
     settings: {
       title: 'Settings',
@@ -433,6 +451,11 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       libreTorrentDesc:
         'Recommended for large games at full speed using the P2P button.',
       libreTorrentAction: 'Install',
+      discordTitle: 'Join Official Discord',
+      discordDesc: 'Ask questions, report bugs, and request new ports',
+      discordAction: 'Join Official Discord',
+      discordUnavailable: 'Unavailable right now',
+      discordErrorHint: 'Could not load the Discord invite link right now.',
       storageSectionTitle: 'Storage & Data',
       clearHistoryTitle: 'Clear download history',
       clearHistoryDesc: 'Removes local download history entries',
@@ -463,6 +486,9 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       downloadAgain: 'Download again',
       copied: 'Copied',
       copyP2P: 'Copy P2P link',
+      copyMagnet: 'Copy Magnet Link',
+      copyMagnetHint:
+        'If your system blocks automatic opening, copy the link and paste it into LibreTorrent.',
       redirectedNotice: 'Redirected to your device download manager',
       maxSpeedTipTitle: 'Tip for maximum speed:',
       maxSpeedTipBody:
@@ -573,6 +599,7 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       downloadAgain: 'Descargar de nuevo',
       direct: 'Directo',
       p2p: 'P2P',
+      copyMagnet: 'Copiar enlace Magnet',
     },
     settings: {
       title: 'Ajustes',
@@ -606,6 +633,11 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       libreTorrentDesc:
         'Recomendado para juegos pesados a máxima velocidad con el botón P2P.',
       libreTorrentAction: 'Instalar',
+      discordTitle: 'Entrar al Discord Oficial',
+      discordDesc: 'Resuelve dudas, reporta errores y pide nuevos ports',
+      discordAction: 'Entrar al Discord Oficial',
+      discordUnavailable: 'No disponible ahora',
+      discordErrorHint: 'No se pudo cargar el enlace de Discord en este momento.',
       storageSectionTitle: 'Almacenamiento y Datos',
       clearHistoryTitle: 'Borrar historial de descargas',
       clearHistoryDesc: 'Elimina los registros guardados localmente',
@@ -636,6 +668,9 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       downloadAgain: 'Descargar de nuevo',
       copied: 'Copiado',
       copyP2P: 'Copiar enlace P2P',
+      copyMagnet: 'Copiar enlace Magnet',
+      copyMagnetHint:
+        'Si el sistema bloquea la apertura automática, copia el enlace y pégalo en LibreTorrent.',
       redirectedNotice: 'Redirigido al gestor de descargas del dispositivo',
       maxSpeedTipTitle: 'Consejo para máxima velocidad:',
       maxSpeedTipBody:
