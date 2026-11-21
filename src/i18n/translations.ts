@@ -25,9 +25,20 @@ export interface AppTranslations {
   nav: {
     inicio: string;
     jogos: string;
+    categoria: string;
     favoritos: string;
     historico: string;
     configuracoes: string;
+  };
+  collections: {
+    title: string;
+    searchPlaceholder: string;
+    gameSingular: string;
+    gamePlural: string;
+    emptyTitle: string;
+    emptyFilter: string;
+    emptyGames: string;
+    backToCategories: string;
   };
   catalog: {
     searchPlaceholder: string;
@@ -200,9 +211,20 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
     nav: {
       inicio: 'Início',
       jogos: 'Jogos',
+      categoria: 'Categoria',
       favoritos: 'Favoritos',
       historico: 'Histórico',
       configuracoes: 'Configurações',
+    },
+    collections: {
+      title: 'Categoria',
+      searchPlaceholder: 'Pesquisar coleções ou jogos...',
+      gameSingular: 'jogo',
+      gamePlural: 'jogos',
+      emptyTitle: 'Nenhuma categoria criada ainda.',
+      emptyFilter: 'Nenhuma categoria encontrada para essa busca.',
+      emptyGames: 'Nenhum jogo adicionado a esta categoria ainda.',
+      backToCategories: 'Voltar para Categoria',
     },
     catalog: {
       searchPlaceholder: 'Pesquisar jogos...',
@@ -382,9 +404,20 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
     nav: {
       inicio: 'Home',
       jogos: 'Games',
+      categoria: 'Category',
       favoritos: 'Favorites',
       historico: 'History',
       configuracoes: 'Settings',
+    },
+    collections: {
+      title: 'Category',
+      searchPlaceholder: 'Search collections or games...',
+      gameSingular: 'game',
+      gamePlural: 'games',
+      emptyTitle: 'No categories created yet.',
+      emptyFilter: 'No categories match your search.',
+      emptyGames: 'No games added to this category yet.',
+      backToCategories: 'Back to Category',
     },
     catalog: {
       searchPlaceholder: 'Search games...',
@@ -564,9 +597,20 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
     nav: {
       inicio: 'Inicio',
       jogos: 'Juegos',
+      categoria: 'Categoría',
       favoritos: 'Favoritos',
       historico: 'Historial',
       configuracoes: 'Ajustes',
+    },
+    collections: {
+      title: 'Categoría',
+      searchPlaceholder: 'Buscar colecciones o juegos...',
+      gameSingular: 'juego',
+      gamePlural: 'juegos',
+      emptyTitle: 'Aún no hay categorías creadas.',
+      emptyFilter: 'No se encontraron categorías para esa búsqueda.',
+      emptyGames: 'Aún no hay juegos añadidos en esta categoría.',
+      backToCategories: 'Volver a Categoría',
     },
     catalog: {
       searchPlaceholder: 'Buscar juegos...',

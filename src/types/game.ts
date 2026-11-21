@@ -29,7 +29,31 @@ export interface Jogo {
   created_at?: string;
 }
 
-export type TabId = 'inicio' | 'jogos' | 'favoritos' | 'historico' | 'configuracoes';
+export interface CategoriaColecao {
+  id: number | string;
+  nome: string;
+  descricao?: string | null;
+  capa_url?: string | null;
+  ordem?: number | null;
+  jogos_ids?: Array<number | string> | null;
+  created_at?: string;
+}
+
+export interface CategoriaJogoVinculo {
+  id?: number | string;
+  categoria_id: number | string;
+  jogo_id: number | string;
+  ordem?: number | null;
+  created_at?: string;
+}
+
+export type TabId =
+  | 'inicio'
+  | 'jogos'
+  | 'categoria'
+  | 'favoritos'
+  | 'historico'
+  | 'configuracoes';
 
 export type SortOption = 'recentes' | 'nome' | 'tamanho';
 

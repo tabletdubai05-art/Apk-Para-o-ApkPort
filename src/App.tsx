@@ -4,12 +4,14 @@ import { Browser } from '@capacitor/browser';
 import { createClient } from '@supabase/supabase-js';
 import {
   ArrowDownUp,
+  ArrowLeft,
   Check,
   ChevronDown,
   Gamepad2,
   Heart,
   History,
   Home,
+  Layers,
   LayoutGrid,
   List,
   RefreshCw,
@@ -19,6 +21,10 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
+import {
+  GridCollectionCard,
+  ListCollectionCard,
+} from './components/CollectionCard';
 import {
   FeaturedCard,
   GridGameCard,
@@ -41,6 +47,8 @@ import {
   restartCleanDownload,
 } from './services/downloadEngine';
 import type {
+  CategoriaColecao,
+  CategoriaJogoVinculo,
   DownloadMethod,
   DownloadTask,
   Jogo,
@@ -169,6 +177,16 @@ export default function App() {
   const [jogos, setJogos] = useState<Jogo[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [categorias, setCategorias] = useState<CategoriaColecao[]>([]);
+  const [categoriaVinculos, setCategoriaVinculos] = useState<
+    CategoriaJogoVinculo[]
+  >([]);
+  const [categoriasLoading, setCategoriasLoading] = useState<boolean>(true);
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(
+    null
+  );
+  const [collectionSearchQuery, setCollectionSearchQuery] = useState<string>('');
 
   const [activeTab, setActiveTab] = useState<TabId>('inicio');
   const [selectedGame, setSelectedGame] = useState<Jogo | null>(null);
@@ -346,6 +364,10 @@ export default function App() {
           setDiscordUrl((prev) => prev || configDiscord);
         }
 
+        const configLinkApk = isValidHttpUrl(row.link_apk)
+          ? row.link_apk.trim()
+          : null;
+
         const rawRemoteVersion = row.versao_atual;
         const versaoAtual =
           typeof rawRemoteVersion === 'string'
@@ -354,8 +376,33 @@ export default function App() {
             ? String(rawRemoteVersion).trim()
             : '';
 
+        const ensurePendingAcceptanceRow = async (
+          targetVersion: string,
+          apkUrl: string | null
+        ) => {
+          try {
+            const { data: existing, error: existingErr } = await supabase
+              .from('aceitar')
+              .select('id, versao')
+              .eq('versao', targetVersion)
+              .limit(1);
+
+            if (existingErr) return;
+            if (!existing || existing.length === 0) {
+              await supabase.from('aceitar').insert({
+                versao: targetVersion,
+                link_apk: apkUrl,
+                aceito: false,
+              });
+            }
+          } catch {
+            // Tabela `aceitar` ainda não criada ou protegida por RLS
+          }
+        };
+
         // Se a APP_VERSION do aplicativo instalado for MAIOR que a versão salva no Supabase,
-        // sincroniza automaticamente a tabela `config` para igualar à APP_VERSION atual.
+        // sincroniza automaticamente a tabela `config` para igualar à APP_VERSION atual
+        // e garante o registro da solicitação pendente na tabela `aceitar`.
         if (!versaoAtual || isRemoteVersionGreater(APP_VERSION, versaoAtual)) {
           try {
             const updateBuilder = supabase
@@ -373,6 +420,8 @@ export default function App() {
             // Ignora silenciosamente caso RLS bloqueie escrita anônima
           }
 
+          await ensurePendingAcceptanceRow(APP_VERSION, configLinkApk);
+
           try {
             localStorage.setItem(INSTALLED_VERSION_STORAGE_KEY, APP_VERSION);
           } catch {
@@ -382,15 +431,90 @@ export default function App() {
           return 'up-to-date';
         }
 
-        // Se a versão no Supabase for MAIOR que a APP_VERSION instalada, mostra o modal de atualização.
+        // Consulta a tabela `public.aceitar` para saber se a atualização já foi aceita pelo Admin
+        const { data: aceitarRows, error: aceitarError } = await supabase
+          .from('aceitar')
+          .select('*')
+          .order('created_at', { ascending: false })
+          .order('id', { ascending: false })
+          .limit(25);
+
+        if (!aceitarError) {
+          const parsedRequests = (aceitarRows ?? [])
+            .map((entry) => {
+              const rec = entry as Record<string, unknown>;
+              const rawVer = rec.versao ?? rec.versao_atual;
+              const ver =
+                typeof rawVer === 'string'
+                  ? rawVer.trim()
+                  : rawVer !== null && rawVer !== undefined
+                  ? String(rawVer).trim()
+                  : '';
+              const rawAceito = rec.aceito ?? rec.aprovado;
+              const isAccepted =
+                rawAceito === true ||
+                rawAceito === 'true' ||
+                rec.status === 'aceito';
+              const linkApk = isValidHttpUrl(rec.link_apk)
+                ? rec.link_apk.trim()
+                : configLinkApk;
+              const releaseNotes =
+                typeof rec.release_notes === 'string' &&
+                rec.release_notes.trim()
+                  ? rec.release_notes.trim()
+                  : undefined;
+
+              return {
+                versao: ver,
+                aceito: isAccepted,
+                linkApk,
+                releaseNotes,
+              };
+            })
+            .filter((item) => Boolean(item.versao));
+
+          // Só libera o modal de atualização se houver uma versão MAIOR já marcada como aceito = true
+          const approvedUpdate = parsedRequests.find(
+            (item) =>
+              item.aceito &&
+              isRemoteVersionGreater(item.versao, APP_VERSION) &&
+              Boolean(item.linkApk)
+          );
+
+          if (approvedUpdate && approvedUpdate.linkApk) {
+            if (showPromptIfAvailable) {
+              setAvailableUpdate({
+                versaoAtual: approvedUpdate.versao,
+                linkApk: approvedUpdate.linkApk,
+                releaseNotes: approvedUpdate.releaseNotes,
+              });
+            }
+            return 'update-available';
+          }
+
+          // Se a tabela `config` já tiver uma versão maior ainda sem solicitação em `aceitar`,
+          // cria a solicitação pendente (`aceito: false`) para aparecer no app Admin.
+          if (isRemoteVersionGreater(versaoAtual, APP_VERSION)) {
+            const alreadyListed = parsedRequests.some(
+              (item) => item.versao === versaoAtual
+            );
+            if (!alreadyListed) {
+              await ensurePendingAcceptanceRow(versaoAtual, configLinkApk);
+            }
+          }
+
+          return 'up-to-date';
+        }
+
+        // Fallback caso a tabela `aceitar` ainda não tenha sido criada no Supabase
         if (
           isRemoteVersionGreater(versaoAtual, APP_VERSION) &&
-          isValidHttpUrl(row.link_apk)
+          configLinkApk
         ) {
           if (showPromptIfAvailable) {
             setAvailableUpdate({
               versaoAtual,
-              linkApk: row.link_apk.trim(),
+              linkApk: configLinkApk,
             });
           }
           return 'update-available';
@@ -462,6 +586,63 @@ export default function App() {
   useEffect(() => {
     void fetchJogos();
   }, [fetchJogos]);
+
+  // Fetch custom collections (`public.categorias` + `public.categoria_jogos`) from Supabase
+  const fetchCategorias = useCallback(async () => {
+    setCategoriasLoading(true);
+    try {
+      let catData: CategoriaColecao[] = [];
+      const catOrdered = await supabase
+        .from('categorias')
+        .select('*')
+        .order('ordem', { ascending: true })
+        .order('created_at', { ascending: false });
+
+      if (!catOrdered.error) {
+        catData = (catOrdered.data as CategoriaColecao[]) || [];
+      } else {
+        const catFallback = await supabase.from('categorias').select('*');
+        if (!catFallback.error) {
+          catData = (catFallback.data as CategoriaColecao[]) || [];
+        }
+      }
+
+      let linksData: CategoriaJogoVinculo[] = [];
+      const linksOrdered = await supabase
+        .from('categoria_jogos')
+        .select('*')
+        .order('ordem', { ascending: true })
+        .order('id', { ascending: true });
+
+      if (!linksOrdered.error) {
+        linksData = (linksOrdered.data as CategoriaJogoVinculo[]) || [];
+      } else {
+        const linksFallback = await supabase
+          .from('categoria_jogos')
+          .select('*');
+        if (!linksFallback.error) {
+          linksData = (linksFallback.data as CategoriaJogoVinculo[]) || [];
+        }
+      }
+
+      setCategorias(catData);
+      setCategoriaVinculos(linksData);
+    } catch {
+      // Tabelas `categorias` / `categoria_jogos` ainda não criadas ou vazias
+    } finally {
+      setCategoriasLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchCategorias();
+  }, [fetchCategorias]);
+
+  useEffect(() => {
+    if (activeTab === 'categoria') {
+      void fetchCategorias();
+    }
+  }, [activeTab, fetchCategorias]);
 
   // Fetch official Discord invite link (most recent row) from Supabase `public.discord` table
   const fetchDiscordLink = useCallback(async () => {
@@ -870,6 +1051,83 @@ export default function App() {
     return jogos.filter((j) => favorites.includes(String(j.id)));
   }, [jogos, favorites]);
 
+  const jogosById = useMemo(() => {
+    const map = new Map<string, Jogo>();
+    for (const jogo of jogos) {
+      map.set(String(jogo.id), jogo);
+    }
+    return map;
+  }, [jogos]);
+
+  const resolvedCollections = useMemo(() => {
+    const linksByCat = new Map<string, CategoriaJogoVinculo[]>();
+    for (const link of categoriaVinculos) {
+      const catKey = String(link.categoria_id);
+      const list = linksByCat.get(catKey) || [];
+      list.push(link);
+      linksByCat.set(catKey, list);
+    }
+
+    return categorias.map((categoria) => {
+      const catKey = String(categoria.id);
+      const links = [...(linksByCat.get(catKey) || [])].sort(
+        (a, b) => (a.ordem ?? 0) - (b.ordem ?? 0)
+      );
+
+      const games: Jogo[] = [];
+      const seenIds = new Set<string>();
+
+      for (const link of links) {
+        const gameId = String(link.jogo_id);
+        if (seenIds.has(gameId)) continue;
+        const matched = jogosById.get(gameId);
+        if (matched) {
+          seenIds.add(gameId);
+          games.push(matched);
+        }
+      }
+
+      if (Array.isArray(categoria.jogos_ids)) {
+        for (const rawId of categoria.jogos_ids) {
+          const gameId = String(rawId);
+          if (seenIds.has(gameId)) continue;
+          const matched = jogosById.get(gameId);
+          if (matched) {
+            seenIds.add(gameId);
+            games.push(matched);
+          }
+        }
+      }
+
+      return {
+        categoria,
+        games,
+      };
+    });
+  }, [categorias, categoriaVinculos, jogosById]);
+
+  const filteredCollections = useMemo(() => {
+    const q = collectionSearchQuery.trim().toLowerCase();
+    if (!q) return resolvedCollections;
+
+    return resolvedCollections.filter(({ categoria, games }) => {
+      if (categoria.nome.toLowerCase().includes(q)) return true;
+      if (categoria.descricao && categoria.descricao.toLowerCase().includes(q)) {
+        return true;
+      }
+      return games.some((g) => g.titulo.toLowerCase().includes(q));
+    });
+  }, [resolvedCollections, collectionSearchQuery]);
+
+  const selectedCollection = useMemo(() => {
+    if (!selectedCollectionId) return null;
+    return (
+      resolvedCollections.find(
+        (c) => String(c.categoria.id) === selectedCollectionId
+      ) || null
+    );
+  }, [resolvedCollections, selectedCollectionId]);
+
   const downloadList = useMemo(() => {
     return Object.values(downloads).sort((a, b) => b.updatedAt - a.updatedAt);
   }, [downloads]);
@@ -1187,13 +1445,18 @@ export default function App() {
 
           <button
             type="button"
-            onClick={() => void fetchJogos()}
+            onClick={() => {
+              void fetchJogos();
+              void fetchCategorias();
+            }}
             aria-label={t.catalog.refreshCatalog}
             className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 transition-colors"
           >
             <RefreshCw
               className={`w-4 h-4 ${
-                loading ? 'animate-spin text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC]' : ''
+                loading || categoriasLoading
+                  ? 'animate-spin text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC]'
+                  : ''
               }`}
             />
           </button>
@@ -1273,6 +1536,129 @@ export default function App() {
           </div>
         )}
 
+        {/* Tab: Categoria (Franquias e Coleções configuráveis pelo Admin) */}
+        {activeTab === 'categoria' && (
+          <div className="space-y-6">
+            {selectedCollection ? (
+              <section className="space-y-4">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2.5 min-w-0">
+                    <button
+                      type="button"
+                      onClick={() => setSelectedCollectionId(null)}
+                      aria-label={t.collections.backToCategories}
+                      className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[#111827] dark:text-white hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 transition-colors shrink-0"
+                    >
+                      <ArrowLeft className="w-5 h-5" />
+                    </button>
+                    <div className="min-w-0">
+                      <h2 className="text-base sm:text-lg font-bold text-[#111827] dark:text-white truncate">
+                        {selectedCollection.categoria.nome} (
+                        {selectedCollection.games.length})
+                      </h2>
+                      {selectedCollection.categoria.descricao?.trim() && (
+                        <p className="text-xs text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] line-clamp-1">
+                          {selectedCollection.categoria.descricao.trim()}
+                        </p>
+                      )}
+                    </div>
+                  </div>
+                  {renderViewToggle()}
+                </div>
+
+                {renderGameList(
+                  selectedCollection.games,
+                  t.collections.emptyGames
+                )}
+              </section>
+            ) : (
+              <>
+                <div className="relative">
+                  <Search className="w-5 h-5 text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+                  <input
+                    type="search"
+                    value={collectionSearchQuery}
+                    onChange={(e) => setCollectionSearchQuery(e.target.value)}
+                    placeholder={t.collections.searchPlaceholder}
+                    aria-label={t.collections.searchPlaceholder}
+                    className="w-full h-12 pl-12 pr-11 rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-sm text-[#111827] dark:text-white placeholder-[#525866] dark:placeholder-[#9CA3AF] purple:placeholder-[#C4B5FD]/75 focus:outline-none focus:border-[#6366F1] purple:focus:border-[#C084FC] transition-colors"
+                  />
+                  {collectionSearchQuery && (
+                    <button
+                      type="button"
+                      onClick={() => setCollectionSearchQuery('')}
+                      aria-label="Limpar busca"
+                      className="absolute right-1.5 top-1/2 -translate-y-1/2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
+
+                <section className="space-y-3">
+                  <div className="flex items-center justify-between gap-3">
+                    <h2 className="text-base sm:text-lg font-bold text-[#111827] dark:text-white">
+                      {t.collections.title} ({filteredCollections.length})
+                    </h2>
+                    {renderViewToggle()}
+                  </div>
+
+                  {categoriasLoading || loading ? (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {Array.from({ length: 4 }).map((_, idx) => (
+                        <div
+                          key={idx}
+                          className="h-28 rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] animate-pulse"
+                        />
+                      ))}
+                    </div>
+                  ) : filteredCollections.length === 0 ? (
+                    <div className="rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-8 text-center space-y-2">
+                      <Layers className="w-8 h-8 text-[#6366F1]/70 purple:text-[#C084FC]/80 mx-auto" />
+                      <p className="text-sm font-medium text-[#111827] dark:text-white">
+                        {collectionSearchQuery.trim()
+                          ? t.collections.emptyFilter
+                          : t.collections.emptyTitle}
+                      </p>
+                      {collectionSearchQuery.trim() && (
+                        <button
+                          type="button"
+                          onClick={() => setCollectionSearchQuery('')}
+                          className="mt-2 min-h-[44px] px-4 rounded-xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs font-semibold text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 transition-colors"
+                        >
+                          {t.catalog.clearFilters}
+                        </button>
+                      )}
+                    </div>
+                  ) : viewMode === 'grade' ? (
+                    <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                      {filteredCollections.map(({ categoria, games }) => (
+                        <GridCollectionCard
+                          key={categoria.id}
+                          categoria={categoria}
+                          games={games}
+                          onSelect={setSelectedCollectionId}
+                        />
+                      ))}
+                    </div>
+                  ) : (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {filteredCollections.map(({ categoria, games }) => (
+                        <ListCollectionCard
+                          key={categoria.id}
+                          categoria={categoria}
+                          games={games}
+                          onSelect={setSelectedCollectionId}
+                        />
+                      ))}
+                    </div>
+                  )}
+                </section>
+              </>
+            )}
+          </div>
+        )}
+
         {/* Tab: Favoritos */}
         {activeTab === 'favoritos' && (
           <section className="space-y-4">
@@ -1348,11 +1734,12 @@ export default function App() {
         aria-label="Navegação principal"
         className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-[#1B1924]/95 purple:bg-[#20143A]/95 backdrop-blur-md border-t border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] pb-safe"
       >
-        <div className="max-w-3xl mx-auto grid grid-cols-5 items-center h-16 px-1">
+        <div className="max-w-3xl mx-auto grid grid-cols-6 items-center h-16 px-1">
           {(
             [
               { id: 'inicio', label: t.nav.inicio, icon: Home },
               { id: 'jogos', label: t.nav.jogos, icon: Gamepad2 },
+              { id: 'categoria', label: t.nav.categoria, icon: Layers },
               { id: 'favoritos', label: t.nav.favoritos, icon: Heart },
               { id: 'historico', label: t.nav.historico, icon: History },
               { id: 'configuracoes', label: t.nav.configuracoes, icon: Settings },
@@ -1365,7 +1752,12 @@ export default function App() {
               <button
                 key={item.id}
                 type="button"
-                onClick={() => setActiveTab(item.id)}
+                onClick={() => {
+                  if (item.id === 'categoria') {
+                    setSelectedCollectionId(null);
+                  }
+                  setActiveTab(item.id);
+                }}
                 className={`relative min-h-[44px] flex flex-col items-center justify-center gap-1 rounded-xl px-0.5 transition-colors ${
                   isActive
                     ? 'text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC]'
@@ -1374,14 +1766,14 @@ export default function App() {
               >
                 <div className="relative">
                   <Icon
-                    className={`w-5 h-5 ${
+                    className={`w-[18px] h-[18px] sm:w-5 sm:h-5 ${
                       isActive && item.id === 'favoritos'
                         ? 'fill-[#6366F1] dark:fill-[#8B5CF6] purple:fill-[#C084FC]'
                         : ''
                     }`}
                   />
                 </div>
-                <span className="text-[10px] font-medium tracking-tight whitespace-nowrap truncate max-w-full">
+                <span className="text-[9px] sm:text-[10px] font-medium tracking-tight whitespace-nowrap truncate max-w-full">
                   {item.label}
                 </span>
               </button>
