@@ -343,12 +343,17 @@ jobs:
           KEYSTORE_STORE_PASS: ${{ secrets.KEYSTORE_STORE_PASS }}
           KEYSTORE_KEY_PASS: ${{ secrets.KEYSTORE_KEY_PASS }}
         run: |
-          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_ALIAS" ] || [ -z "$KEYSTORE_STORE_PASS" ] || [ -z "$KEYSTORE_KEY_PASS" ]; then
-            echo "::error::Secrets de assinatura ausentes. Configure KEYSTORE_BASE64, KEYSTORE_ALIAS, KEYSTORE_STORE_PASS e KEYSTORE_KEY_PASS nos GitHub Repository Secrets."
+          MISSING=""
+          [ -z "$KEYSTORE_BASE64" ] && MISSING="$MISSING KEYSTORE_BASE64"
+          [ -z "$KEYSTORE_ALIAS" ] && MISSING="$MISSING KEYSTORE_ALIAS"
+          [ -z "$KEYSTORE_STORE_PASS" ] && MISSING="$MISSING KEYSTORE_STORE_PASS"
+          [ -z "$KEYSTORE_KEY_PASS" ] && MISSING="$MISSING KEYSTORE_KEY_PASS"
+          if [ -n "$MISSING" ]; then
+            echo "::error::Secrets de assinatura ausentes em Repository Secrets:$MISSING"
             exit 1
           fi
 
-          echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
+          printf '%s' "$KEYSTORE_BASE64" | tr -d '[:space:]' | base64 -d > release.keystore
           chmod 600 release.keystore
 
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name "apksigner" | sort -V | tail -n 1)
