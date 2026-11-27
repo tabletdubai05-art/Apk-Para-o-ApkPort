@@ -57,10 +57,35 @@ jobs:
           {
             "appId": "com.droidport.store",
             "appName": "DroidPort Store",
-            "webDir": "dist"
+            "webDir": "dist",
+            "plugins": {
+              "SystemBars": {
+                "insetsHandling": "css",
+                "style": "DARK",
+                "initialViewportFitValueHint": "cover"
+              }
+            }
           }
           EOF
           npx cap add android
+          node -e '
+            const fs = require("fs");
+            const stylesPath = "android/app/src/main/res/values/styles.xml";
+            if (fs.existsSync(stylesPath)) {
+              let styles = fs.readFileSync(stylesPath, "utf8");
+              if (!styles.includes("android:windowFullscreen")) {
+                styles = styles.replace(
+                  /<style name="AppTheme\.NoActionBar"[^>]*>/,
+                  "$&\n        <item name=\"android:windowFullscreen\">true</item>"
+                );
+                styles = styles.replace(
+                  /<style name="AppTheme\.NoActionBarLaunch"[^>]*>/,
+                  "$&\n        <item name=\"android:windowFullscreen\">true</item>"
+                );
+                fs.writeFileSync(stylesPath, styles, "utf8");
+              }
+            }
+          '
 
       - name: Configurar Queries e Deep Link OAuth no AndroidManifest
         env:
@@ -126,9 +151,18 @@ jobs:
           import android.content.pm.PackageManager;
           import android.content.pm.ResolveInfo;
           import android.net.Uri;
+          import android.os.Build;
+          import android.os.Bundle;
           import android.text.TextUtils;
+          import android.view.View;
+          import android.view.Window;
+          import android.view.WindowManager;
           import android.webkit.WebResourceRequest;
           import android.webkit.WebView;
+
+          import androidx.core.view.WindowCompat;
+          import androidx.core.view.WindowInsetsCompat;
+          import androidx.core.view.WindowInsetsControllerCompat;
 
           import com.getcapacitor.BridgeActivity;
           import com.getcapacitor.BridgeWebViewClient;
@@ -144,8 +178,23 @@ jobs:
               private boolean customWebViewClientConfigured = false;
 
               @Override
+              protected void onCreate(Bundle savedInstanceState) {
+                  super.onCreate(savedInstanceState);
+                  applyFullscreenMode();
+              }
+
+              @Override
+              public void onWindowFocusChanged(boolean hasFocus) {
+                  super.onWindowFocusChanged(hasFocus);
+                  if (hasFocus) {
+                      applyFullscreenMode();
+                  }
+              }
+
+              @Override
               public void onResume() {
                   super.onResume();
+                  applyFullscreenMode();
                   if (!customWebViewClientConfigured && getBridge() != null && getBridge().getWebView() != null) {
                       customWebViewClientConfigured = true;
                       getBridge().getWebView().setWebViewClient(new BridgeWebViewClient(getBridge()) {
@@ -168,6 +217,28 @@ jobs:
                               return super.shouldOverrideUrlLoading(view, url);
                           }
                       });
+                  }
+              }
+
+              private void applyFullscreenMode() {
+                  Window window = getWindow();
+                  if (window == null) return;
+                  WindowCompat.setDecorFitsSystemWindows(window, false);
+                  if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                      WindowManager.LayoutParams lp = window.getAttributes();
+                      lp.layoutInDisplayCutoutMode =
+                          WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
+                      window.setAttributes(lp);
+                  }
+                  View decorView = window.getDecorView();
+                  WindowInsetsControllerCompat controller =
+                      WindowCompat.getInsetsController(window, decorView);
+                  if (controller != null) {
+                      controller.setSystemBarsBehavior(
+                          WindowInsetsControllerCompat.BEHAVIOR_SHOW_TRANSIENT_BARS_BY_SWIPE
+                      );
+                      controller.setAppearanceLightStatusBars(false);
+                      controller.hide(WindowInsetsCompat.Type.statusBars());
                   }
               }
 

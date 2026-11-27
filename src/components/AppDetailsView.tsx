@@ -48,7 +48,7 @@ export function AppDetailsView({ app, onBack }: AppDetailsViewProps) {
 
   return (
     <div className="min-h-screen bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#140C24] text-[#111827] dark:text-white pb-24">
-      <header className="sticky top-0 z-30 bg-[#F4F5F9]/90 dark:bg-[#0F0E13]/90 purple:bg-[#140C24]/90 backdrop-blur-md border-b border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466]">
+      <header className="sticky top-0 z-30 bg-[#F4F5F9]/90 dark:bg-[#0F0E13]/90 purple:bg-[#140C24]/90 backdrop-blur-md border-b border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] pt-safe">
         <div className="max-w-4xl mx-auto px-4 h-16 flex items-center gap-3">
           <button
             type="button"

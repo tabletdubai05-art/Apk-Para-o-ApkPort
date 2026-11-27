@@ -1606,7 +1606,7 @@ export default function App() {
   );
 
   return (
-    <div className="min-h-screen bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#140C24] text-[#111827] dark:text-white pb-24">
+    <div className="min-h-screen bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#140C24] text-[#111827] dark:text-white pt-safe pb-24">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 pt-4 sm:pt-6 space-y-6">
         {/* Top Brand Row */}
         <header className="flex items-center justify-between gap-4">

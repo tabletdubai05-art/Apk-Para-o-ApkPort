@@ -1,3 +1,4 @@
+import { SystemBars, SystemBarsStyle, SystemBarType } from '@capacitor/core';
 import {
   createContext,
   useContext,
@@ -14,6 +15,7 @@ import {
   type LanguagePreference,
   type ThemePreference,
 } from '../i18n/translations';
+import { isNativeApp } from '../lib/communitySupabase';
 
 const THEME_STORAGE_KEY = 'droidport_theme_v1';
 const LANGUAGE_STORAGE_KEY = 'droidport_language_v1';
@@ -143,6 +145,21 @@ export function PreferencesProvider({ children }: { children: ReactNode }) {
         'content',
         isPurple ? '#140C24' : resolvedTheme === 'dark' ? '#0F0E13' : '#F4F5F9'
       );
+    }
+
+    if (isNativeApp()) {
+      const barStyle = isDarkLike
+        ? SystemBarsStyle.Dark
+        : SystemBarsStyle.Light;
+      void SystemBars.setStyle({
+        bar: SystemBarType.StatusBar,
+        style: barStyle,
+      }).catch(() => {});
+      void SystemBars.setStyle({
+        bar: SystemBarType.NavigationBar,
+        style: barStyle,
+      }).catch(() => {});
+      void SystemBars.hide({ bar: SystemBarType.StatusBar }).catch(() => {});
     }
   }, [resolvedTheme]);
 
