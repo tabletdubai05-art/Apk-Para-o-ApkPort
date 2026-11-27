@@ -1,4 +1,11 @@
 import type { Jogo, JogoArquivo, TutorialItem } from '../types/game';
+import {
+  parseSafeYoutubeEmbedUrl,
+  sanitizeDirectDownloadUrl,
+  sanitizeGalleryMediaUrl,
+  sanitizeMediaUrl,
+  sanitizeP2PTorrentUrl,
+} from './urlSecurity';
 
 export function parseCategories(categoria?: string | null): string[] {
   if (!categoria) return [];
@@ -49,15 +56,107 @@ export function formatSpeedMBs(bytesPerSec: number): string {
   return `${mbPerSec.toFixed(2)} MB/s`;
 }
 
+export type GalleryMediaKind = 'image' | 'gif' | 'video';
+
+export interface GalleryMediaItem {
+  url: string;
+  kind: GalleryMediaKind;
+}
+
+const DATA_URI_HEADER_BEFORE_COMMA_RE = /^data:image\/[a-z0-9.+-]+(?:;[^,]*)?$/i;
+const LOOP_VIDEO_EXT_RE = /\.(mp4|webm|mov|m4v)$/i;
+const GIF_EXT_RE = /\.gif$/i;
+
+function splitMediaListPreservingDataUrls(rawText: string): string[] {
+  const trimmed = rawText.trim();
+  if (!trimmed) return [];
+
+  if (trimmed.startsWith('[') && trimmed.endsWith(']')) {
+    try {
+      const parsed = JSON.parse(trimmed) as unknown;
+      if (Array.isArray(parsed)) {
+        return parsed.map((item) => String(item ?? '').trim()).filter(Boolean);
+      }
+    } catch {
+      // Fall through to comma/newline parser
+    }
+  }
+
+  const lines = trimmed
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
+
+  const items: string[] = [];
+  for (const line of lines) {
+    const parts = line.split(',');
+    for (let i = 0; i < parts.length; i++) {
+      const part = parts[i].trim();
+      if (!part) continue;
+
+      if (
+        DATA_URI_HEADER_BEFORE_COMMA_RE.test(part) &&
+        i + 1 < parts.length
+      ) {
+        const base64Payload = parts[i + 1].trim();
+        items.push(`${part},${base64Payload}`);
+        i += 1;
+      } else {
+        items.push(part);
+      }
+    }
+  }
+
+  return items;
+}
+
+export function classifyGalleryMedia(url: string): GalleryMediaKind {
+  const trimmed = url.trim();
+  if (!trimmed) return 'image';
+
+  if (/^data:image\/gif;/i.test(trimmed)) {
+    return 'gif';
+  }
+  if (/^data:image\//i.test(trimmed)) {
+    return 'image';
+  }
+
+  let pathname = trimmed;
+  try {
+    const parsed = new URL(trimmed);
+    pathname = parsed.pathname;
+  } catch {
+    pathname = trimmed.split('?')[0].split('#')[0];
+  }
+
+  if (LOOP_VIDEO_EXT_RE.test(pathname)) {
+    return 'video';
+  }
+  if (GIF_EXT_RE.test(pathname)) {
+    return 'gif';
+  }
+
+  return 'image';
+}
+
 export function parsePhotos(fotosUrls?: string | string[] | null): string[] {
   if (!fotosUrls) return [];
-  if (Array.isArray(fotosUrls)) {
-    return fotosUrls.map((u) => String(u).trim()).filter(Boolean);
-  }
-  return fotosUrls
-    .split(',')
-    .map((u) => u.trim())
-    .filter(Boolean);
+  const rawList = Array.isArray(fotosUrls)
+    ? fotosUrls.map((u) => String(u ?? '').trim()).filter(Boolean)
+    : splitMediaListPreservingDataUrls(String(fotosUrls));
+
+  return rawList
+    .map((u) => sanitizeGalleryMediaUrl(u))
+    .filter((u): u is string => Boolean(u));
+}
+
+export function parseGalleryMedia(
+  fotosUrls?: string | string[] | null
+): GalleryMediaItem[] {
+  return parsePhotos(fotosUrls).map((url) => ({
+    url,
+    kind: classifyGalleryMedia(url),
+  }));
 }
 
 export interface ParsedVideo {
@@ -70,28 +169,23 @@ export function parseVideoSource(videoUrl?: string | null): ParsedVideo | null {
   const url = videoUrl.trim();
   if (!url) return null;
 
-  try {
-    // Handle YouTube URLs: watch?v=, youtu.be/, shorts/, live/, embed/
-    const ytMatch = url.match(
-      /(?:youtube\.com\/(?:watch\?(?:.*&)?v=|embed\/|shorts\/|live\/)|youtu\.be\/)([a-zA-Z0-9_-]{11})/
-    );
-    if (ytMatch && ytMatch[1]) {
-      return {
-        type: 'youtube',
-        src: `https://www.youtube.com/embed/${ytMatch[1]}?rel=0&modestbranding=1`,
-      };
-    }
-
+  const youtubeEmbed = parseSafeYoutubeEmbedUrl(url);
+  if (youtubeEmbed) {
     return {
-      type: 'direct',
-      src: url,
-    };
-  } catch {
-    return {
-      type: 'direct',
-      src: url,
+      type: 'youtube',
+      src: youtubeEmbed,
     };
   }
+
+  const safeDirectMedia = sanitizeMediaUrl(url);
+  if (!safeDirectMedia) {
+    return null;
+  }
+
+  return {
+    type: 'direct',
+    src: safeDirectMedia,
+  };
 }
 
 export function sanitizeFolderName(title: string): string {
@@ -152,43 +246,44 @@ export function resolveGameFiles(jogo: Jogo): JogoArquivo[] {
     }
   }
 
+  const fallbackTorrent = sanitizeP2PTorrentUrl(jogo.torrent_url);
+
   if (Array.isArray(rawArquivos) && rawArquivos.length > 0) {
     const valid = rawArquivos
-      .filter(
-        (item) =>
-          item &&
-          ((typeof item.url === 'string' && item.url.trim() !== '') ||
-            (typeof item.torrent_url === 'string' && item.torrent_url.trim() !== ''))
-      )
       .map((item, idx) => {
-        const itemUrl = typeof item.url === 'string' ? item.url.trim() : '';
-        const itemTorrent =
-          typeof item.torrent_url === 'string' && item.torrent_url.trim() !== ''
-            ? item.torrent_url.trim()
-            : idx === 0 && typeof jogo.torrent_url === 'string' && jogo.torrent_url.trim() !== ''
-            ? jogo.torrent_url.trim()
-            : null;
+        if (!item || typeof item !== 'object') return null;
+        const safeUrl = sanitizeDirectDownloadUrl(item.url) ?? '';
+        const safeItemTorrent =
+          sanitizeP2PTorrentUrl(item.torrent_url) ??
+          (idx === 0 ? fallbackTorrent : null);
 
-        return {
-          nome: (item.nome || `Arquivo ${idx + 1}`).trim(),
-          tamanho: (item.tamanho || jogo.tamanho || '').trim(),
-          url: itemUrl,
-          torrent_url: itemTorrent,
+        if (!safeUrl && !safeItemTorrent) {
+          return null;
+        }
+
+        const entry: JogoArquivo = {
+          nome: (typeof item.nome === 'string' && item.nome.trim()) || `Arquivo ${idx + 1}`,
+          tamanho: (typeof item.tamanho === 'string' ? item.tamanho : jogo.tamanho || '').trim(),
+          url: safeUrl,
+          torrent_url: safeItemTorrent,
         };
-      });
+        return entry;
+      })
+      .filter((item): item is JogoArquivo => item !== null);
 
     if (valid.length > 0) {
       return valid;
     }
   }
 
-  if (jogo.webseed_url || jogo.torrent_url) {
+  const safeWebseed = sanitizeDirectDownloadUrl(jogo.webseed_url) ?? '';
+  if (safeWebseed || fallbackTorrent) {
     return [
       {
         nome: 'APK Principal',
         tamanho: jogo.tamanho || '',
-        url: jogo.webseed_url?.trim() || '',
-        torrent_url: jogo.torrent_url?.trim() || null,
+        url: safeWebseed,
+        torrent_url: fallbackTorrent,
       },
     ];
   }
@@ -251,12 +346,13 @@ export function parseTutorials(
         Boolean(item) && typeof item === 'object'
     )
     .map((item, idx) => {
-      const url = typeof item.url === 'string' ? item.url.trim() : '';
+      const safeUrl = sanitizeMediaUrl(item.url);
+      if (!safeUrl) return null;
       const titulo =
         typeof item.titulo === 'string' && item.titulo.trim()
           ? item.titulo.trim()
           : `Tutorial ${idx + 1}`;
-      return { titulo, url };
+      return { titulo, url: safeUrl };
     })
-    .filter((item) => item.url !== '');
+    .filter((item): item is TutorialItem => item !== null);
 }

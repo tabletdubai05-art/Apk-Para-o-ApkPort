@@ -30,6 +30,7 @@ import {
   PENDING_REPORT_GAME_KEY,
   signInCommunityWithGoogle,
 } from '../lib/communitySupabase';
+import { sanitizeDiscordUrl, sanitizeImageUrl } from '../utils/urlSecurity';
 
 interface SettingsViewProps {
   appVersion: string;
@@ -57,10 +58,10 @@ function getGoogleUserName(user: User): string {
 
 function getGoogleUserAvatar(user: User): string | null {
   const meta = user.user_metadata as Record<string, unknown> | undefined;
-  const url =
+  const raw =
     (typeof meta?.avatar_url === 'string' && meta.avatar_url.trim()) ||
     (typeof meta?.picture === 'string' && meta.picture.trim());
-  return url || null;
+  return sanitizeImageUrl(raw);
 }
 
 export function SettingsView({
@@ -180,11 +181,15 @@ export function SettingsView({
     }
   };
 
+  const safeDiscordUrl = sanitizeDiscordUrl(discordUrl);
+
   const handleNativeDiscordOpen = async (url: string) => {
+    const validated = sanitizeDiscordUrl(url);
+    if (!validated) return;
     try {
-      await Browser.open({ url });
+      await Browser.open({ url: validated });
     } catch {
-      window.open(url, '_system');
+      window.open(validated, '_blank', 'noopener,noreferrer');
     }
   };
 
@@ -345,15 +350,15 @@ export function SettingsView({
           </div>
         </div>
 
-        {discordUrl ? (
+        {safeDiscordUrl ? (
           <a
-            href={discordUrl}
+            href={safeDiscordUrl}
             target="_blank"
             rel="noopener noreferrer"
             onClick={(e) => {
               if (isNativeApp()) {
                 e.preventDefault();
-                void handleNativeDiscordOpen(discordUrl);
+                void handleNativeDiscordOpen(safeDiscordUrl);
               }
             }}
             className="w-full min-h-[44px] px-4 rounded-xl bg-[#5865F2] hover:bg-[#4752C4] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 shadow-md shadow-[#5865F2]/25 active:scale-[0.99] transition-all"

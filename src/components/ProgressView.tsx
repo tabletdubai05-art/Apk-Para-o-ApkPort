@@ -4,6 +4,10 @@ import { usePreferences } from '../context/PreferencesContext';
 import { copyTextToClipboard } from '../services/downloadEngine';
 import type { DownloadMethod, DownloadTask } from '../types/game';
 import { formatHistoryDateTime } from '../utils/formatters';
+import {
+  sanitizeDirectDownloadUrl,
+  sanitizeP2PTorrentUrl,
+} from '../utils/urlSecurity';
 import { GameCover } from './GameCover';
 
 interface ProgressViewProps {
@@ -47,8 +51,8 @@ export function ProgressView({
     <div className="space-y-3">
       {tasks.map((task) => {
         const startedAt = formatHistoryDateTime(task.initiatedAt ?? task.updatedAt);
-        const directUrl = task.webseed_url?.trim() || '';
-        const torrentUrl = task.torrent_url?.trim() || '';
+        const directUrl = sanitizeDirectDownloadUrl(task.webseed_url) || '';
+        const torrentUrl = sanitizeP2PTorrentUrl(task.torrent_url) || '';
 
         return (
           <article

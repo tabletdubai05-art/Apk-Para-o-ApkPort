@@ -1,6 +1,7 @@
 import { Browser } from '@capacitor/browser';
 import { Capacitor } from '@capacitor/core';
-import { createClient } from '@supabase/supabase-js';
+import { createClient, type SupportedStorage } from '@supabase/supabase-js';
+import { sanitizeHttpUrl } from '../utils/urlSecurity';
 
 const COMMUNITY_SUPABASE_URL = 'https://gtkitrxssdkncjpwzvjl.supabase.co';
 const COMMUNITY_SUPABASE_ANON_KEY =
@@ -8,6 +9,22 @@ const COMMUNITY_SUPABASE_ANON_KEY =
 
 export const PENDING_REPORT_GAME_KEY = 'droidport_pending_report_game_v1';
 export const NATIVE_OAUTH_REDIRECT_URL = 'droidport://login-callback';
+
+const processedAuthCodes = new Set<string>();
+
+function getConfiguredAppLinkRedirect(): string | null {
+  try {
+    const metaEnv = (import.meta as unknown as { env?: Record<string, unknown> })?.env;
+    const raw = metaEnv?.VITE_OAUTH_APP_LINK_URL;
+    return sanitizeHttpUrl(raw, { requireHttps: true });
+  } catch {
+    return null;
+  }
+}
+
+export function getNativeOAuthRedirectUrl(): string {
+  return getConfiguredAppLinkRedirect() || NATIVE_OAUTH_REDIRECT_URL;
+}
 
 export function isNativeApp(): boolean {
   if (typeof window === 'undefined') return false;
@@ -22,12 +39,41 @@ export function isNativeApp(): boolean {
   return protocol === 'capacitor:' || protocol === 'file:';
 }
 
+function createSafeSessionStorage(): SupportedStorage | undefined {
+  if (typeof window === 'undefined') return undefined;
+  return {
+    getItem: (key: string) => {
+      try {
+        return window.localStorage.getItem(key);
+      } catch {
+        return null;
+      }
+    },
+    setItem: (key: string, value: string) => {
+      try {
+        window.localStorage.setItem(key, value);
+      } catch {
+        // Ignore storage quota errors
+      }
+    },
+    removeItem: (key: string) => {
+      try {
+        window.localStorage.removeItem(key);
+      } catch {
+        // Ignore storage errors
+      }
+    },
+  };
+}
+
 export const communitySupabase = createClient(
   COMMUNITY_SUPABASE_URL,
   COMMUNITY_SUPABASE_ANON_KEY,
   {
     auth: {
+      flowType: 'pkce',
       storageKey: 'droidport_community_supabase_auth_v1',
+      storage: createSafeSessionStorage(),
       persistSession: true,
       autoRefreshToken: true,
       detectSessionInUrl: !isNativeApp(),
@@ -35,12 +81,64 @@ export const communitySupabase = createClient(
   }
 );
 
+export type ParsedOAuthCallback =
+  | { valid: false }
+  | { valid: true; error: string }
+  | { valid: true; code: string };
+
+export function parsePkceOAuthCallback(rawUrl: string): ParsedOAuthCallback {
+  if (!rawUrl || typeof rawUrl !== 'string') {
+    return { valid: false };
+  }
+
+  let parsed: URL;
+  try {
+    parsed = new URL(rawUrl.trim());
+  } catch {
+    return { valid: false };
+  }
+
+  const appLinkRedirect = getConfiguredAppLinkRedirect();
+  const isCustomSchemeMatch =
+    parsed.protocol === 'droidport:' && parsed.hostname === 'login-callback';
+  let isAppLinkMatch = false;
+  if (appLinkRedirect) {
+    try {
+      const expected = new URL(appLinkRedirect);
+      isAppLinkMatch =
+        parsed.origin === expected.origin &&
+        parsed.pathname === expected.pathname;
+    } catch {
+      isAppLinkMatch = false;
+    }
+  }
+
+  if (!isCustomSchemeMatch && !isAppLinkMatch) {
+    return { valid: false };
+  }
+
+  const errorCode =
+    parsed.searchParams.get('error_description') ||
+    parsed.searchParams.get('error');
+  if (errorCode) {
+    return { valid: true, error: errorCode.trim() };
+  }
+
+  const code = parsed.searchParams.get('code')?.trim();
+  if (!code) {
+    return { valid: false };
+  }
+
+  return { valid: true, code };
+}
+
 export async function signInCommunityWithGoogle(): Promise<void> {
   if (isNativeApp()) {
+    const redirectTo = getNativeOAuthRedirectUrl();
     const { data, error } = await communitySupabase.auth.signInWithOAuth({
       provider: 'google',
       options: {
-        redirectTo: NATIVE_OAUTH_REDIRECT_URL,
+        redirectTo,
         skipBrowserRedirect: true,
       },
     });
@@ -49,11 +147,12 @@ export async function signInCommunityWithGoogle(): Promise<void> {
       throw new Error(error.message);
     }
 
-    if (data?.url) {
+    const safeOAuthUrl = sanitizeHttpUrl(data?.url, { requireHttps: true });
+    if (safeOAuthUrl) {
       try {
-        await Browser.open({ url: data.url });
+        await Browser.open({ url: safeOAuthUrl });
       } catch {
-        window.open(data.url, '_system');
+        window.open(safeOAuthUrl, '_blank', 'noopener,noreferrer');
       }
     }
     return;
@@ -72,49 +171,27 @@ export async function signInCommunityWithGoogle(): Promise<void> {
 }
 
 export async function handleOAuthCallbackUrl(rawUrl: string): Promise<boolean> {
-  if (!rawUrl || !rawUrl.startsWith(NATIVE_OAUTH_REDIRECT_URL)) {
+  const parsed = parsePkceOAuthCallback(rawUrl);
+  if (!parsed.valid) {
     return false;
   }
 
-  const hashIndex = rawUrl.indexOf('#');
-  const queryIndex = rawUrl.indexOf('?');
-
-  const hashStr = hashIndex !== -1 ? rawUrl.slice(hashIndex + 1) : '';
-  const queryStr =
-    queryIndex !== -1
-      ? rawUrl.slice(
-          queryIndex + 1,
-          hashIndex !== -1 && hashIndex > queryIndex ? hashIndex : undefined
-        )
-      : '';
-
-  const hashParams = new URLSearchParams(hashStr);
-  const queryParams = new URLSearchParams(queryStr);
-
-  const accessToken =
-    hashParams.get('access_token') || queryParams.get('access_token');
-  const refreshToken =
-    hashParams.get('refresh_token') || queryParams.get('refresh_token');
-  const code = queryParams.get('code') || hashParams.get('code');
-
-  if (accessToken && refreshToken) {
-    const { error } = await communitySupabase.auth.setSession({
-      access_token: accessToken,
-      refresh_token: refreshToken,
-    });
-    if (error) {
-      throw error;
-    }
-    return true;
+  if ('error' in parsed) {
+    throw new Error(parsed.error);
   }
 
-  if (code) {
-    const { error } = await communitySupabase.auth.exchangeCodeForSession(code);
-    if (error) {
-      throw error;
-    }
-    return true;
+  if (processedAuthCodes.has(parsed.code)) {
+    return false;
+  }
+  processedAuthCodes.add(parsed.code);
+
+  const { error } = await communitySupabase.auth.exchangeCodeForSession(
+    parsed.code
+  );
+  if (error) {
+    processedAuthCodes.delete(parsed.code);
+    throw error;
   }
 
-  return false;
+  return true;
 }

@@ -47,10 +47,31 @@ export interface CategoriaJogoVinculo {
   created_at?: string;
 }
 
+export type AppLinkType = 'download' | 'site' | 'playstore';
+
+export interface AppItem {
+  id: number | string;
+  created_at?: string;
+  nome: string;
+  categoria?: string | null;
+  versao?: string | null;
+  tamanho?: string | null;
+  descricao?: string | null;
+  icone_url?: string | null;
+  fotos_urls?: string | string[] | null;
+  tipo_link?: AppLinkType | string | null;
+  link_url: string;
+  link_secundario_url?: string | null;
+  link_secundario_label?: string | null;
+  destaque?: boolean | null;
+  ordem?: number | null;
+}
+
 export type TabId =
   | 'inicio'
   | 'jogos'
   | 'categoria'
+  | 'apps'
   | 'favoritos'
   | 'historico'
   | 'configuracoes';

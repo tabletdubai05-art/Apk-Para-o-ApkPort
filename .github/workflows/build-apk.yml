@@ -4,73 +4,118 @@ on:
   push:
     branches: [ main, master ]
   workflow_dispatch:
+    inputs:
+      publish_release:
+        description: 'Publicar Release automática no GitHub após o build'
+        required: false
+        default: 'true'
+        type: choice
+        options:
+          - 'true'
+          - 'false'
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   build:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
 
     steps:
-      - name: Baixar codigo do repositorio
-        uses: actions/checkout@v4
+      - name: Baixar código do repositório
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Configurar Node.js
-        uses: actions/setup-node@v4
+      - name: Configurar Node.js 22
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
         with:
-          node-version: 22
+          node-version: '22'
+          cache: 'npm'
 
-      - name: Configurar Java 17
-        uses: actions/setup-java@v4
+      - name: Configurar Java 21 (Capacitor 8 / AGP 8)
+        uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
         with:
           distribution: 'temurin'
-          java-version: '17'
+          java-version: '21'
 
-      - name: Limpar pacotes conflitantes e gerar build web
+      - name: Validar dependências, tipos, testes e gerar build web
+        env:
+          VITE_ALLOWED_APK_HOSTS: ${{ vars.VITE_ALLOWED_APK_HOSTS }}
+          VITE_ALLOWED_DOWNLOAD_HOSTS: ${{ vars.VITE_ALLOWED_DOWNLOAD_HOSTS }}
+          VITE_OAUTH_APP_LINK_URL: ${{ vars.VITE_OAUTH_APP_LINK_URL }}
         run: |
-          rm -rf node_modules package-lock.json
-          sed -i '/@capacitor\/filesystem/d' package.json
-          npm install --legacy-peer-deps
+          npm ci --legacy-peer-deps
+          npm run lint
+          npm test
           npm run build
 
-      - name: Instalar e configurar Capacitor Android, App e Browser
+      - name: Preparar projeto Android com Capacitor 8
         run: |
-          npm install @capacitor/core@6 @capacitor/cli@6 @capacitor/android@6 @capacitor/browser@6 @capacitor/app@6 --legacy-peer-deps
           rm -f capacitor.config.ts capacitor.config.js
-          echo '{"appId":"com.droidport.store","appName":"DroidPort Store","webDir":"dist"}' > capacitor.config.json
+          cat << 'EOF' > capacitor.config.json
+          {
+            "appId": "com.droidport.store",
+            "appName": "DroidPort Store",
+            "webDir": "dist"
+          }
+          EOF
           npx cap add android
 
-      - name: Configurar LibreTorrent e Deep Link Login Google no AndroidManifest
-        run: |
-          MANIFEST="android/app/src/main/AndroidManifest.xml"
-          if ! grep -q "org.proninyaroslav.libretorrent" "$MANIFEST"; then
-            sed -i 's/<\/manifest>/<queries><package android:name="org.proninyaroslav.libretorrent" \/><\/queries><\/manifest>/' "$MANIFEST"
-          fi
-          if ! grep -q "droidport" "$MANIFEST"; then
-            sed -i 's/<\/activity>/<intent-filter><action android:name="android.intent.action.VIEW" \/><category android:name="android.intent.category.DEFAULT" \/><category android:name="android.intent.category.BROWSABLE" \/><data android:scheme="droidport" android:host="login-callback" \/><\/intent-filter><\/activity>/' "$MANIFEST"
-          fi
-
-      - name: Configurar Deep Link OAuth no AndroidManifest
+      - name: Configurar Queries e Deep Link OAuth no AndroidManifest
+        env:
+          OAUTH_APP_LINK_URL: ${{ vars.VITE_OAUTH_APP_LINK_URL }}
         run: |
           node -e '
             const fs = require("fs");
             const manifestPath = "android/app/src/main/AndroidManifest.xml";
             let xml = fs.readFileSync(manifestPath, "utf8");
-            if (!xml.includes("droidport")) {
-              const intentFilter = `
+
+            if (!xml.includes("org.proninyaroslav.libretorrent")) {
+              xml = xml.replace(
+                "</manifest>",
+                `    <queries>\n        <package android:name="org.proninyaroslav.libretorrent" />\n    </queries>\n</manifest>`
+              );
+            }
+
+            if (!xml.includes("android:scheme=\"droidport\"")) {
+              const customSchemeFilter = `
             <intent-filter>
                 <action android:name="android.intent.action.VIEW" />
                 <category android:name="android.intent.category.DEFAULT" />
                 <category android:name="android.intent.category.BROWSABLE" />
                 <data android:scheme="droidport" android:host="login-callback" />
             </intent-filter>`;
-              xml = xml.replace("</activity>", `${intentFilter}\n        </activity>`);
-              fs.writeFileSync(manifestPath, xml, "utf8");
+              xml = xml.replace("</activity>", `${customSchemeFilter}\n        </activity>`);
             }
+
+            // Opcional: Android App Links verificados via HTTPS (requer /.well-known/assetlinks.json no domínio configurado)
+            const rawAppLink = (process.env.OAUTH_APP_LINK_URL || "").trim();
+            if (rawAppLink) {
+              try {
+                const parsed = new URL(rawAppLink);
+                if (parsed.protocol === "https:" && parsed.hostname) {
+                  const pathPrefix = parsed.pathname && parsed.pathname !== "/" ? parsed.pathname : "/login-callback";
+                  const appLinkFilter = `
+            <intent-filter android:autoVerify="true">
+                <action android:name="android.intent.action.VIEW" />
+                <category android:name="android.intent.category.DEFAULT" />
+                <category android:name="android.intent.category.BROWSABLE" />
+                <data android:scheme="https" android:host="${parsed.hostname}" android:pathPrefix="${pathPrefix}" />
+            </intent-filter>`;
+                  if (!xml.includes(`android:host="${parsed.hostname}"`)) {
+                    xml = xml.replace("</activity>", `${appLinkFilter}\n        </activity>`);
+                  }
+                }
+              } catch (e) {
+                console.warn("VITE_OAUTH_APP_LINK_URL inválida ignorada:", e.message);
+              }
+            }
+
+            fs.writeFileSync(manifestPath, xml, "utf8");
           '
 
-      - name: Configurar Intent Handler P2P na MainActivity
+      - name: Configurar Intent Handler P2P Protegido na MainActivity
         run: |
           cat << 'EOF' > android/app/src/main/java/com/droidport/store/MainActivity.java
           package com.droidport.store;
@@ -81,6 +126,7 @@ jobs:
           import android.content.pm.PackageManager;
           import android.content.pm.ResolveInfo;
           import android.net.Uri;
+          import android.text.TextUtils;
           import android.webkit.WebResourceRequest;
           import android.webkit.WebView;
 
@@ -88,8 +134,13 @@ jobs:
           import com.getcapacitor.BridgeWebViewClient;
 
           import java.net.URISyntaxException;
+          import java.util.Locale;
 
           public class MainActivity extends BridgeActivity {
+              private static final String ALLOWED_TORRENT_PACKAGE = "org.proninyaroslav.libretorrent";
+              private static final String ALLOWED_PLAY_STORE_URL =
+                  "https://play.google.com/store/apps/details?id=org.proninyaroslav.libretorrent";
+
               private boolean customWebViewClientConfigured = false;
 
               @Override
@@ -109,6 +160,7 @@ jobs:
                           }
 
                           @Override
+                          @SuppressWarnings("deprecation")
                           public boolean shouldOverrideUrlLoading(WebView view, String url) {
                               if (handleExternalOrIntentUrl(view, url)) {
                                   return true;
@@ -119,60 +171,145 @@ jobs:
                   }
               }
 
-              private boolean handleExternalOrIntentUrl(WebView view, String url) {
-                  if (url == null) return false;
-                  if (url.startsWith("intent://") || url.startsWith("intent:")) {
+              private boolean isBlockedWebViewScheme(String lowerUrl) {
+                  return lowerUrl.startsWith("javascript:")
+                      || lowerUrl.startsWith("file:")
+                      || lowerUrl.startsWith("content:")
+                      || lowerUrl.startsWith("data:")
+                      || lowerUrl.startsWith("vbscript:");
+              }
+
+              private boolean isAllowedIntentScheme(String scheme) {
+                  if (scheme == null) return false;
+                  String normalized = scheme.toLowerCase(Locale.ROOT);
+                  return "magnet".equals(normalized)
+                      || "https".equals(normalized)
+                      || "http".equals(normalized);
+              }
+
+              private boolean isSafeHttpsUrl(String candidate) {
+                  if (TextUtils.isEmpty(candidate)) return false;
+                  Uri parsed = Uri.parse(candidate.trim());
+                  return "https".equalsIgnoreCase(parsed.getScheme())
+                      && !TextUtils.isEmpty(parsed.getHost())
+                      && TextUtils.isEmpty(parsed.getUserInfo());
+              }
+
+              private void launchPlayStoreFallback(Context context) {
+                  try {
+                      Intent storeIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(ALLOWED_PLAY_STORE_URL));
+                      storeIntent.addCategory(Intent.CATEGORY_BROWSABLE);
+                      storeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                      context.startActivity(storeIntent);
+                  } catch (ActivityNotFoundException ignored) {
+                      // Nenhum navegador/Play Store disponível
+                  }
+              }
+
+              private boolean handleExternalOrIntentUrl(WebView view, String rawUrl) {
+                  if (rawUrl == null || view == null) return false;
+
+                  String url = rawUrl.trim();
+                  String lower = url.toLowerCase(Locale.ROOT);
+
+                  // Bloqueia esquemas perigosos na WebView antes de qualquer roteamento
+                  if (isBlockedWebViewScheme(lower)) {
+                      return true;
+                  }
+
+                  if (lower.startsWith("intent://") || lower.startsWith("intent:")) {
+                      Context context = view.getContext();
                       try {
-                          Context context = view.getContext();
                           Intent intent = Intent.parseUri(url, Intent.URI_INTENT_SCHEME);
-                          if (intent != null) {
-                              String dataStr = intent.getDataString();
-                              if (dataStr != null && dataStr.startsWith("magnet://?")) {
-                                  intent.setData(Uri.parse("magnet:?" + dataStr.substring("magnet://?".length())));
-                              }
-                              intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                              PackageManager pm = context.getPackageManager();
-                              ResolveInfo info = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
-                              if (info != null) {
-                                  context.startActivity(intent);
-                                  return true;
-                              }
-                              String fallbackUrl = intent.getStringExtra("browser_fallback_url");
-                              if (fallbackUrl != null && !fallbackUrl.isEmpty()) {
-                                  Intent fallbackIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(fallbackUrl));
-                                  fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                          if (intent == null) {
+                              return true;
+                          }
+
+                          // Remove alvos arbitrários para impedir Intent Redirection / seletor malicioso
+                          intent.setComponent(null);
+                          intent.setSelector(null);
+                          intent.addCategory(Intent.CATEGORY_BROWSABLE);
+
+                          String action = intent.getAction();
+                          if (TextUtils.isEmpty(action)) {
+                              intent.setAction(Intent.ACTION_VIEW);
+                          } else if (!Intent.ACTION_VIEW.equals(action)) {
+                              return true;
+                          }
+
+                          // Normaliza magnet://? -> magnet:?
+                          String dataStr = intent.getDataString();
+                          if (dataStr != null && dataStr.toLowerCase(Locale.ROOT).startsWith("magnet://?")) {
+                              intent.setData(Uri.parse("magnet:?" + dataStr.substring("magnet://?".length())));
+                          }
+
+                          Uri dataUri = intent.getData();
+                          String scheme = dataUri != null ? dataUri.getScheme() : intent.getScheme();
+                          if (dataUri == null || !isAllowedIntentScheme(scheme)) {
+                              return true;
+                          }
+
+                          // Restringe pacotes externos exclusivamente ao cliente torrent homologado
+                          String targetPackage = intent.getPackage();
+                          if (!TextUtils.isEmpty(targetPackage) && !ALLOWED_TORRENT_PACKAGE.equals(targetPackage)) {
+                              return true;
+                          }
+                          intent.setPackage(ALLOWED_TORRENT_PACKAGE);
+                          intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+
+                          PackageManager pm = context.getPackageManager();
+                          ResolveInfo info = pm.resolveActivity(intent, PackageManager.MATCH_DEFAULT_ONLY);
+                          if (info != null) {
+                              context.startActivity(intent);
+                              return true;
+                          }
+
+                          String fallbackUrl = intent.getStringExtra("browser_fallback_url");
+                          if (isSafeHttpsUrl(fallbackUrl)) {
+                              Intent fallbackIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(fallbackUrl.trim()));
+                              fallbackIntent.addCategory(Intent.CATEGORY_BROWSABLE);
+                              fallbackIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                              if (pm.resolveActivity(fallbackIntent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
                                   context.startActivity(fallbackIntent);
                                   return true;
                               }
                           }
+
+                          launchPlayStoreFallback(context);
+                          return true;
                       } catch (URISyntaxException | ActivityNotFoundException ignored) {
+                          return true;
                       }
-                      return true;
                   }
-                  if (url.startsWith("magnet:")) {
+
+                  if (lower.startsWith("magnet:")) {
+                      Context context = view.getContext();
                       try {
-                          Context context = view.getContext();
-                          Intent magnetIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(url));
-                          magnetIntent.setPackage("org.proninyaroslav.libretorrent");
+                          Uri magnetUri = Uri.parse(url);
+                          if (!"magnet".equalsIgnoreCase(magnetUri.getScheme()) || url.contains("#Intent;")) {
+                              return true;
+                          }
+                          Intent magnetIntent = new Intent(Intent.ACTION_VIEW, magnetUri);
+                          magnetIntent.addCategory(Intent.CATEGORY_BROWSABLE);
+                          magnetIntent.setPackage(ALLOWED_TORRENT_PACKAGE);
                           magnetIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
                           if (context.getPackageManager().resolveActivity(magnetIntent, PackageManager.MATCH_DEFAULT_ONLY) != null) {
                               context.startActivity(magnetIntent);
                           } else {
-                              Intent storeIntent = new Intent(Intent.ACTION_VIEW, Uri.parse("https://play.google.com/store/apps/details?id=org.proninyaroslav.libretorrent"));
-                              storeIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
-                              context.startActivity(storeIntent);
+                              launchPlayStoreFallback(context);
                           }
                           return true;
                       } catch (ActivityNotFoundException ignored) {
                           return true;
                       }
                   }
+
                   return false;
               }
           }
           EOF
 
-      - name: Substituir icone do Android pelo icon.png
+      - name: Substituir ícone do Android e sincronizar Capacitor
         run: |
           mkdir -p assets
           if [ -f "public/icon.png" ]; then cp public/icon.png assets/icon.png; fi
@@ -180,40 +317,79 @@ jobs:
           if [ -f "assets/icon.png" ]; then
             npx @capacitor/assets generate --android
           fi
-          npx cap sync
+          npx cap sync android
 
-      - name: Atualizar versionCode e Compilar APK
+      - name: Atualizar versionCode/versionName e Compilar APK Release
         run: |
-          sed -i "s/versionCode 1/versionCode ${{ github.run_number }}/g" android/app/build.gradle
-          sed -i "s/versionName \"1.0\"/versionName \"1.0.${{ github.run_number }}\"/g" android/app/build.gradle
+          node -e '
+            const fs = require("fs");
+            const gradlePath = "android/app/build.gradle";
+            let gradle = fs.readFileSync(gradlePath, "utf8");
+            const runNum = process.env.GITHUB_RUN_NUMBER || "1";
+            gradle = gradle.replace(/versionCode\s+\d+/, `versionCode ${runNum}`);
+            gradle = gradle.replace(/versionName\s+"[^"]+"/, `versionName "1.0.${runNum}"`);
+            fs.writeFileSync(gradlePath, gradle, "utf8");
+          '
           cd android
           chmod +x gradlew
           ./gradlew assembleRelease
+        env:
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
 
-      - name: Assinar APK com Chave Fixa (KEYSTORE_BASE64)
+      - name: Validar Secrets de Assinatura e Assinar APK
+        env:
+          KEYSTORE_BASE64: ${{ secrets.KEYSTORE_BASE64 }}
+          KEYSTORE_ALIAS: ${{ secrets.KEYSTORE_ALIAS }}
+          KEYSTORE_STORE_PASS: ${{ secrets.KEYSTORE_STORE_PASS }}
+          KEYSTORE_KEY_PASS: ${{ secrets.KEYSTORE_KEY_PASS }}
         run: |
-          echo "${{ secrets.KEYSTORE_BASE64 }}" | base64 -d > fixed.keystore
-          APKSIGNER=$(find $ANDROID_HOME/build-tools -name "apksigner" | sort -V | tail -n 1)
-          $APKSIGNER sign \
-            --ks fixed.keystore \
-            --ks-key-alias androiddebugkey \
-            --ks-pass pass:android \
-            --key-pass pass:android \
+          if [ -z "$KEYSTORE_BASE64" ] || [ -z "$KEYSTORE_ALIAS" ] || [ -z "$KEYSTORE_STORE_PASS" ] || [ -z "$KEYSTORE_KEY_PASS" ]; then
+            echo "::error::Secrets de assinatura ausentes. Configure KEYSTORE_BASE64, KEYSTORE_ALIAS, KEYSTORE_STORE_PASS e KEYSTORE_KEY_PASS nos GitHub Repository Secrets."
+            exit 1
+          fi
+
+          echo "$KEYSTORE_BASE64" | base64 -d > release.keystore
+          chmod 600 release.keystore
+
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name "apksigner" | sort -V | tail -n 1)
+          if [ -z "$APKSIGNER" ]; then
+            echo "::error::apksigner não encontrado em ANDROID_HOME/build-tools"
+            exit 1
+          fi
+
+          "$APKSIGNER" sign \
+            --ks release.keystore \
+            --ks-key-alias "$KEYSTORE_ALIAS" \
+            --ks-pass "env:KEYSTORE_STORE_PASS" \
+            --key-pass "env:KEYSTORE_KEY_PASS" \
             --out DroidPort-Store.apk \
             android/app/build/outputs/apk/release/app-release-unsigned.apk
 
-      - name: Disponibilizar DroidPort-Store.apk nos Artifacts
-        uses: actions/upload-artifact@v4
+          "$APKSIGNER" verify --verbose --print-certs DroidPort-Store.apk
+          sha256sum DroidPort-Store.apk > DroidPort-Store.apk.sha256
+          cat DroidPort-Store.apk.sha256
+
+      - name: Limpar Keystore Temporária do Runner
+        if: always()
+        run: |
+          rm -f release.keystore fixed.keystore
+
+      - name: Disponibilizar DroidPort-Store.apk e SHA-256 nos Artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
           name: DroidPort-Store-APK
-          path: DroidPort-Store.apk
+          path: |
+            DroidPort-Store.apk
+            DroidPort-Store.apk.sha256
 
-      - name: Publicar Release Automatica no GitHub
-        uses: softprops/action-gh-release@v2
+      - name: Publicar Release no GitHub (com APK e SHA-256)
+        if: ${{ github.event_name == 'push' || inputs.publish_release == 'true' }}
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
         with:
           tag_name: v${{ github.run_number }}
           name: Atualizacao Build ${{ github.run_number }}
-          files: DroidPort-Store.apk
+          files: |
+            DroidPort-Store.apk
+            DroidPort-Store.apk.sha256
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          

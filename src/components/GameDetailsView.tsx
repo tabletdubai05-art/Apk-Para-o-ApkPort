@@ -3,8 +3,6 @@ import {
   ArrowLeft,
   Check,
   CheckCircle2,
-  ChevronLeft,
-  ChevronRight,
   Copy,
   Download,
   FileArchive,
@@ -12,7 +10,6 @@ import {
   Info,
   PlayCircle,
   RotateCcw,
-  X,
   Zap,
 } from 'lucide-react';
 import { usePreferences } from '../context/PreferencesContext';
@@ -22,13 +19,18 @@ import {
   buildDownloadTaskId,
   buildP2PDownloadTaskId,
   formatCategoriesDot,
-  parsePhotos,
+  parseGalleryMedia,
   parseTutorials,
   parseVideoSource,
   resolveGameFiles,
 } from '../utils/formatters';
+import {
+  sanitizeDirectDownloadUrl,
+  sanitizeP2PTorrentUrl,
+} from '../utils/urlSecurity';
 import { DeviceCompatibilitySection } from './DeviceCompatibilitySection';
 import { GameCover } from './GameCover';
+import { MediaGallery } from './MediaGallery';
 
 interface GameDetailsViewProps {
   jogo: Jogo;
@@ -58,12 +60,11 @@ export function GameDetailsView({
   onRetryDownload,
 }: GameDetailsViewProps) {
   const { t } = usePreferences();
-  const [fullscreenIndex, setFullscreenIndex] = useState<number | null>(null);
   const [copiedKey, setCopiedKey] = useState<string | null>(null);
   const gameId = String(jogo.id);
   const categoriesDot = formatCategoriesDot(jogo.categoria);
   const video = parseVideoSource(jogo.video_url);
-  const photos = parsePhotos(jogo.fotos_urls);
+  const galleryMedia = parseGalleryMedia(jogo.fotos_urls);
   const files = resolveGameFiles(jogo);
   const tutorials = parseTutorials(jogo.tutoriais);
   const hasAnyTorrent = files.some((item) => Boolean(item.torrent_url?.trim()));
@@ -193,8 +194,8 @@ export function GameDetailsView({
                     );
                     const isAnyRedirected = isDirectRedirected || isP2PRedirected;
                     const isDirectError = directTask?.status === 'error';
-                    const directUrl = arquivo.url?.trim() || '';
-                    const fileTorrentUrl = arquivo.torrent_url?.trim() || '';
+                    const directUrl = sanitizeDirectDownloadUrl(arquivo.url) || '';
+                    const fileTorrentUrl = sanitizeP2PTorrentUrl(arquivo.torrent_url) || '';
 
                     return (
                       <div
@@ -353,6 +354,8 @@ export function GameDetailsView({
                           src={parsedTutorialVideo.src}
                           title={tutorial.titulo}
                           className="w-full h-full"
+                          sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
+                          referrerPolicy="strict-origin-when-cross-origin"
                           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                           allowFullScreen
                         />
@@ -385,6 +388,8 @@ export function GameDetailsView({
                   src={video.src}
                   title={`Vídeo de ${jogo.titulo}`}
                   className="w-full h-full"
+                  sandbox="allow-scripts allow-same-origin allow-presentation allow-popups"
+                  referrerPolicy="strict-origin-when-cross-origin"
                   allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
                   allowFullScreen
                 />
@@ -401,32 +406,14 @@ export function GameDetailsView({
           </section>
         )}
 
-        {/* Screenshots Gallery */}
-        {photos.length > 0 && (
-          <section className="space-y-3">
-            <h2 className="text-base font-bold text-[#111827] dark:text-white">
-              {t.details.photoGallery} ({photos.length})
-            </h2>
-            <div className="flex gap-3 overflow-x-auto no-scrollbar pb-1 -mx-4 px-4">
-              {photos.map((photoUrl, idx) => (
-                <button
-                  key={`${photoUrl}-${idx}`}
-                  type="button"
-                  onClick={() => setFullscreenIndex(idx)}
-                  className="shrink-0 w-64 sm:w-72 aspect-video rounded-2xl overflow-hidden bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-[#6366F1]/60 purple:hover:border-[#A855F7]/70 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[#6366F1] purple:focus-visible:ring-[#A855F7]"
-                >
-                  <img
-                    src={photoUrl}
-                    alt={`${jogo.titulo} screenshot ${idx + 1}`}
-                    referrerPolicy="no-referrer"
-                    loading="lazy"
-                    className="w-full h-full object-cover"
-                  />
-                </button>
-              ))}
-            </div>
-          </section>
-        )}
+        {/* Screenshots & GIFs Gallery */}
+        <MediaGallery
+          title={t.details.photoGallery}
+          items={galleryMedia}
+          itemTitle={jogo.titulo}
+          showCountInTitle
+          fullBleedCarousel
+        />
 
         {/* Comunidade: Roda no seu celular? */}
         <DeviceCompatibilitySection
@@ -436,67 +423,6 @@ export function GameDetailsView({
           onConsumeAutoOpen={onConsumeAutoOpenReport}
         />
       </main>
-
-      {/* Fullscreen Photo Lightbox */}
-      {fullscreenIndex !== null && photos[fullscreenIndex] && (
-        <div
-          className="fixed inset-0 z-50 bg-black/95 backdrop-blur-sm flex items-center justify-center p-4"
-          onClick={() => setFullscreenIndex(null)}
-        >
-          <button
-            type="button"
-            onClick={() => setFullscreenIndex(null)}
-            aria-label="Fechar imagem em tela cheia"
-            className="absolute top-4 right-4 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-[#1B1924]/90 border border-[#2A2738] text-white"
-          >
-            <X className="w-5 h-5" />
-          </button>
-
-          {photos.length > 1 && (
-            <>
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setFullscreenIndex((prev) =>
-                    prev === null ? 0 : (prev - 1 + photos.length) % photos.length
-                  );
-                }}
-                aria-label="Foto anterior"
-                className="absolute left-3 sm:left-6 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-[#1B1924]/85 border border-[#2A2738] text-white"
-              >
-                <ChevronLeft className="w-5 h-5" />
-              </button>
-
-              <button
-                type="button"
-                onClick={(e) => {
-                  e.stopPropagation();
-                  setFullscreenIndex((prev) =>
-                    prev === null ? 0 : (prev + 1) % photos.length
-                  );
-                }}
-                aria-label="Próxima foto"
-                className="absolute right-3 sm:right-6 min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-[#1B1924]/85 border border-[#2A2738] text-white"
-              >
-                <ChevronRight className="w-5 h-5" />
-              </button>
-            </>
-          )}
-
-          <img
-            src={photos[fullscreenIndex]}
-            alt={`${jogo.titulo} imagem ${fullscreenIndex + 1}`}
-            referrerPolicy="no-referrer"
-            onClick={(e) => e.stopPropagation()}
-            className="max-w-full max-h-[85vh] rounded-xl object-contain"
-          />
-
-          <div className="absolute bottom-5 px-3 py-1 rounded-lg bg-[#1B1924]/85 border border-[#2A2738] text-xs font-mono-nums text-[#9CA3AF]">
-            {fullscreenIndex + 1} / {photos.length}
-          </div>
-        </div>
-      )}
     </div>
   );
 }

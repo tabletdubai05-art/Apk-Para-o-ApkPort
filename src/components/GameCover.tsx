@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { Gamepad2 } from 'lucide-react';
+import { sanitizeImageUrl } from '../utils/urlSecurity';
 
 interface GameCoverProps {
   src?: string | null;
@@ -9,8 +10,9 @@ interface GameCoverProps {
 
 export function GameCover({ src, alt, className = '' }: GameCoverProps) {
   const [hasError, setHasError] = useState(false);
+  const safeSrc = sanitizeImageUrl(src);
 
-  if (!src || hasError) {
+  if (!safeSrc || hasError) {
     return (
       <div
         className={`flex flex-col items-center justify-center bg-gradient-to-br from-[#E9EBF4] via-[#F4F5F9] to-[#E2E4EC] dark:from-[#232030] dark:via-[#1B1924] dark:to-[#14121B] purple:from-[#2C1A52] purple:via-[#20143A] purple:to-[#140C24] text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] select-none ${className}`}
@@ -26,10 +28,11 @@ export function GameCover({ src, alt, className = '' }: GameCoverProps) {
 
   return (
     <img
-      src={src}
+      src={safeSrc}
       alt={alt}
       referrerPolicy="no-referrer"
       loading="lazy"
+      decoding="async"
       onError={() => setHasError(true)}
       className={`object-cover ${className}`}
     />

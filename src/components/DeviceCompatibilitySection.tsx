@@ -24,6 +24,18 @@ import {
   detectCurrentDevice,
   inferBrandFromModel,
 } from '../utils/deviceDetector';
+import {
+  dedupeInFlight,
+  formatFriendlySupabaseError,
+  getCachedValue,
+  invalidateCacheKey,
+  setCachedValue,
+  withRetryOnTransientError,
+} from '../utils/supabaseResilience';
+import { sanitizeImageUrl } from '../utils/urlSecurity';
+
+const REPORTS_PAGE_SIZE = 20;
+const REPORTS_CACHE_TTL_MS = 60_000;
 
 const BRAND_OPTIONS = [
   'Samsung',
@@ -85,7 +97,7 @@ const TAG_OPTIONS = [
   'Zerei o jogo nesse port',
 ] as const;
 
-const MAX_TAGS = 6;
+const MAX_TAGS = 15;
 
 const RATING_LABELS: Record<number, string> = {
   1: 'Não roda',
@@ -142,10 +154,10 @@ function getUserDisplayName(user: User): string {
 
 function getUserAvatarUrl(user: User): string | null {
   const meta = user.user_metadata as Record<string, unknown> | undefined;
-  const url =
+  const raw =
     (typeof meta?.avatar_url === 'string' && meta.avatar_url.trim()) ||
     (typeof meta?.picture === 'string' && meta.picture.trim());
-  return url || null;
+  return sanitizeImageUrl(raw);
 }
 
 interface ReportAvatarProps {
@@ -156,13 +168,16 @@ interface ReportAvatarProps {
 function ReportAvatar({ name, avatarUrl }: ReportAvatarProps) {
   const [imgFailed, setImgFailed] = useState(false);
   const initial = (name.trim()[0] || 'J').toUpperCase();
+  const safeAvatarUrl = sanitizeImageUrl(avatarUrl);
 
-  if (avatarUrl && !imgFailed) {
+  if (safeAvatarUrl && !imgFailed) {
     return (
       <img
-        src={avatarUrl}
+        src={safeAvatarUrl}
         alt={name}
         referrerPolicy="no-referrer"
+        loading="lazy"
+        decoding="async"
         onError={() => setImgFailed(true)}
         className="w-10 h-10 rounded-full object-cover border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] shrink-0"
       />
@@ -191,7 +206,9 @@ export function DeviceCompatibilitySection({
 }: DeviceCompatibilitySectionProps) {
   const { t } = usePreferences();
   const [relatos, setRelatos] = useState<RelatoDesempenho[]>([]);
+  const [totalRelatosCount, setTotalRelatosCount] = useState<number>(0);
   const [loadingRelatos, setLoadingRelatos] = useState(true);
+  const [loadingMoreRelatos, setLoadingMoreRelatos] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [deviceSearch, setDeviceSearch] = useState('');
 
@@ -220,32 +237,107 @@ export function DeviceCompatibilitySection({
   const [submitSuccessMessage, setSubmitSuccessMessage] = useState<string | null>(
     null
   );
+  const [ownRelatoRemote, setOwnRelatoRemote] =
+    useState<RelatoDesempenho | null>(null);
+  const [reportLimitNotice, setReportLimitNotice] = useState<string | null>(
+    null
+  );
+  const [deletingReportId, setDeletingReportId] = useState<string | null>(null);
 
-  const fetchRelatos = useCallback(async () => {
-    setLoadingRelatos(true);
-    setLoadError(null);
-    try {
-      const { data, error } = await communitySupabase
-        .from('relatos_desempenho')
-        .select('*')
-        .eq('jogo_id', jogoId)
-        .order('created_at', { ascending: false });
+  const ownRelato = useMemo(() => {
+    if (!currentUser) return null;
+    return (
+      relatos.find((item) => item.user_id === currentUser.id) ?? ownRelatoRemote
+    );
+  }, [currentUser, relatos, ownRelatoRemote]);
 
-      if (error) {
-        throw new Error(error.message);
+  const fetchRelatos = useCallback(
+    async (options?: { forceRefresh?: boolean; offset?: number }) => {
+      const offset = options?.offset ?? 0;
+      const isLoadMore = offset > 0;
+      const cacheKey = `relatos:${jogoId}:page:${offset}`;
+
+      if (!isLoadMore && !options?.forceRefresh) {
+        const cached = getCachedValue<{
+          rows: RelatoDesempenho[];
+          count: number;
+        }>(cacheKey);
+        if (cached) {
+          setRelatos(cached.rows);
+          setTotalRelatosCount(cached.count);
+          setLoadingRelatos(false);
+          setLoadError(null);
+          return;
+        }
       }
 
-      setRelatos((data as RelatoDesempenho[]) || []);
-    } catch (err) {
-      const msg =
-        err instanceof Error
-          ? err.message
-          : 'Não foi possível carregar os relatos da comunidade.';
-      setLoadError(msg);
-    } finally {
-      setLoadingRelatos(false);
-    }
-  }, [jogoId]);
+      if (isLoadMore) {
+        setLoadingMoreRelatos(true);
+      } else {
+        setLoadingRelatos(true);
+        setLoadError(null);
+      }
+
+      try {
+        const result = await dedupeInFlight(cacheKey, () =>
+          withRetryOnTransientError(async () => {
+            const { data, error, count } = await communitySupabase
+              .from('relatos_desempenho')
+              .select(
+                'id, jogo_id, user_id, usuario_nome, usuario_avatar, marca, modelo, chipset, gpu, ram, android_versao, fps, nota, tags, created_at',
+                { count: 'exact' }
+              )
+              .eq('jogo_id', jogoId)
+              .order('created_at', { ascending: false })
+              .range(offset, offset + REPORTS_PAGE_SIZE - 1);
+
+            if (error) {
+              throw error;
+            }
+
+            const rows = (data as RelatoDesempenho[]) || [];
+            return {
+              rows,
+              count: typeof count === 'number' ? count : offset + rows.length,
+            };
+          })
+        );
+
+        if (isLoadMore) {
+          setRelatos((prev) => {
+            const seen = new Set(prev.map((r) => r.id));
+            const merged = [...prev];
+            for (const row of result.rows) {
+              if (!seen.has(row.id)) {
+                merged.push(row);
+              }
+            }
+            return merged;
+          });
+        } else {
+          setRelatos(result.rows);
+          setCachedValue(cacheKey, result, REPORTS_CACHE_TTL_MS);
+        }
+        setTotalRelatosCount(result.count);
+      } catch (err) {
+        if (!isLoadMore) {
+          setLoadError(
+            formatFriendlySupabaseError(
+              err,
+              'Não foi possível carregar os relatos da comunidade.'
+            )
+          );
+        }
+      } finally {
+        if (isLoadMore) {
+          setLoadingMoreRelatos(false);
+        } else {
+          setLoadingRelatos(false);
+        }
+      }
+    },
+    [jogoId]
+  );
 
   useEffect(() => {
     void fetchRelatos();
@@ -274,6 +366,67 @@ export function DeviceCompatibilitySection({
     }
   }, []);
 
+  const checkUserExistingReport = useCallback(
+    async (userId: string): Promise<RelatoDesempenho | null> => {
+      const inList = relatos.find((item) => item.user_id === userId);
+      if (inList) {
+        setOwnRelatoRemote(inList);
+        return inList;
+      }
+
+      try {
+        const { data, error } = await communitySupabase
+          .from('relatos_desempenho')
+          .select(
+            'id, jogo_id, user_id, usuario_nome, usuario_avatar, marca, modelo, chipset, gpu, ram, android_versao, fps, nota, tags, created_at'
+          )
+          .eq('jogo_id', jogoId)
+          .eq('user_id', userId)
+          .order('created_at', { ascending: false })
+          .limit(1);
+
+        if (error) return null;
+        const found = ((data as RelatoDesempenho[] | null) ?? [])[0] ?? null;
+        setOwnRelatoRemote(found);
+        return found;
+      } catch {
+        return null;
+      }
+    },
+    [jogoId, relatos]
+  );
+
+  useEffect(() => {
+    let active = true;
+    setOwnRelatoRemote(null);
+    setReportLimitNotice(null);
+
+    if (!currentUser) {
+      return () => {
+        active = false;
+      };
+    }
+
+    communitySupabase
+      .from('relatos_desempenho')
+      .select(
+        'id, jogo_id, user_id, usuario_nome, usuario_avatar, marca, modelo, chipset, gpu, ram, android_versao, fps, nota, tags, created_at'
+      )
+      .eq('jogo_id', jogoId)
+      .eq('user_id', currentUser.id)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .then(({ data, error }) => {
+        if (!active || error) return;
+        const found = ((data as RelatoDesempenho[] | null) ?? [])[0] ?? null;
+        setOwnRelatoRemote(found);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [currentUser, jogoId]);
+
   useEffect(() => {
     let active = true;
 
@@ -295,7 +448,15 @@ export function DeviceCompatibilitySection({
             const pendingGame = localStorage.getItem(PENDING_REPORT_GAME_KEY);
             if (pendingGame === jogoId) {
               localStorage.removeItem(PENDING_REPORT_GAME_KEY);
-              void openReportFormWithDetection();
+              void (async () => {
+                const existing = await checkUserExistingReport(nextUser.id);
+                if (!active) return;
+                if (existing) {
+                  setReportLimitNotice(t.community.oneReportLimitNotice);
+                } else {
+                  void openReportFormWithDetection();
+                }
+              })();
             }
           } catch {
             // Ignore storage errors
@@ -308,23 +469,42 @@ export function DeviceCompatibilitySection({
       active = false;
       authListener.subscription.unsubscribe();
     };
-  }, [jogoId, openReportFormWithDetection]);
+  }, [
+    checkUserExistingReport,
+    jogoId,
+    openReportFormWithDetection,
+    t.community.oneReportLimitNotice,
+  ]);
 
   // Automatically open report modal after returning from Google OAuth
   useEffect(() => {
-    if (autoOpenReportModal && currentUser) {
-      onConsumeAutoOpen?.();
-      void openReportFormWithDetection();
-    }
+    if (!autoOpenReportModal || !currentUser) return;
+    onConsumeAutoOpen?.();
+    let active = true;
+    void (async () => {
+      const existing = await checkUserExistingReport(currentUser.id);
+      if (!active) return;
+      if (existing) {
+        setReportLimitNotice(t.community.oneReportLimitNotice);
+      } else {
+        void openReportFormWithDetection();
+      }
+    })();
+    return () => {
+      active = false;
+    };
   }, [
     autoOpenReportModal,
+    checkUserExistingReport,
     currentUser,
     onConsumeAutoOpen,
     openReportFormWithDetection,
+    t.community.oneReportLimitNotice,
   ]);
 
   const handleClickReportButton = async () => {
     setAuthError(null);
+    setReportLimitNotice(null);
     const { data } = await communitySupabase.auth.getSession();
     const user = data.session?.user ?? currentUser;
 
@@ -334,6 +514,12 @@ export function DeviceCompatibilitySection({
     }
 
     setCurrentUser(user);
+    const existing = await checkUserExistingReport(user.id);
+    if (existing) {
+      setReportLimitNotice(t.community.oneReportLimitNotice);
+      return;
+    }
+
     void openReportFormWithDetection();
   };
 
@@ -365,6 +551,8 @@ export function DeviceCompatibilitySection({
   const handleSignOut = async () => {
     await communitySupabase.auth.signOut();
     setCurrentUser(null);
+    setOwnRelatoRemote(null);
+    setReportLimitNotice(null);
   };
 
   const handleToggleTag = (tag: string) => {
@@ -406,8 +594,17 @@ export function DeviceCompatibilitySection({
       return;
     }
 
-    const cleanModel = modelo.trim();
-    const cleanBrand = marca.trim() || inferBrandFromModel(cleanModel) || 'Outra';
+    const cleanModel = modelo.trim().slice(0, 120);
+    const cleanBrand = (
+      marca.trim() ||
+      inferBrandFromModel(cleanModel) ||
+      'Outra'
+    ).slice(0, 60);
+    const boundedNota = Math.min(5, Math.max(1, Math.round(nota)));
+    const boundedFps =
+      typeof fps === 'number' && Number.isFinite(fps) && fps >= 1 && fps <= 300
+        ? Math.round(fps)
+        : null;
 
     if (!cleanModel) {
       setEditingSpecs(true);
@@ -420,17 +617,17 @@ export function DeviceCompatibilitySection({
       const payload = {
         jogo_id: jogoId,
         user_id: currentUser.id,
-        usuario_nome: getUserDisplayName(currentUser),
+        usuario_nome: getUserDisplayName(currentUser).slice(0, 120),
         usuario_avatar: getUserAvatarUrl(currentUser),
         marca: cleanBrand,
         modelo: cleanModel,
-        chipset: chipset.trim() || null,
-        gpu: gpu.trim() || null,
-        ram: ram.trim() || null,
-        android_versao: androidVersao.trim() || null,
-        fps,
-        nota,
-        tags: selectedTags,
+        chipset: chipset.trim().slice(0, 120) || null,
+        gpu: gpu.trim().slice(0, 120) || null,
+        ram: ram.trim().slice(0, 40) || null,
+        android_versao: androidVersao.trim().slice(0, 40) || null,
+        fps: boundedFps,
+        nota: boundedNota,
+        tags: selectedTags.slice(0, MAX_TAGS),
       };
 
       if (editingRelatoId) {
@@ -443,23 +640,47 @@ export function DeviceCompatibilitySection({
           .single();
 
         if (error) {
-          throw new Error(error.message);
+          throw error;
         }
+
+        invalidateCacheKey(`relatos:${jogoId}:`, true);
 
         if (data) {
           const updated = data as RelatoDesempenho;
           setRelatos((prev) =>
             prev.map((item) => (item.id === editingRelatoId ? updated : item))
           );
+          setOwnRelatoRemote(updated);
         } else {
-          await fetchRelatos();
+          await fetchRelatos({ forceRefresh: true });
         }
 
         setEditingRelatoId(null);
         setShowReportModal(false);
+        setReportLimitNotice(null);
         setSubmitSuccessMessage(t.community.updateSuccess);
         setTimeout(() => setSubmitSuccessMessage(null), 3500);
       } else {
+        // Garante que o mesmo usuário só tenha 1 relato por jogo
+        const { data: existingOwn, error: checkOwnError } =
+          await communitySupabase
+            .from('relatos_desempenho')
+            .select('id')
+            .eq('jogo_id', jogoId)
+            .eq('user_id', currentUser.id)
+            .limit(1);
+
+        if (checkOwnError) {
+          throw checkOwnError;
+        }
+
+        if (existingOwn && existingOwn.length > 0) {
+          setSubmitError(t.community.oneReportLimitNotice);
+          setReportLimitNotice(t.community.oneReportLimitNotice);
+          await fetchRelatos({ forceRefresh: true });
+          return;
+        }
+
         const { data, error } = await communitySupabase
           .from('relatos_desempenho')
           .insert(payload)
@@ -467,24 +688,31 @@ export function DeviceCompatibilitySection({
           .single();
 
         if (error) {
-          throw new Error(error.message);
+          throw error;
         }
 
+        invalidateCacheKey(`relatos:${jogoId}:`, true);
+
         if (data) {
-          setRelatos((prev) => [data as RelatoDesempenho, ...prev]);
+          const created = data as RelatoDesempenho;
+          setRelatos((prev) => [created, ...prev]);
+          setOwnRelatoRemote(created);
+          setTotalRelatosCount((prev) => prev + 1);
         } else {
-          await fetchRelatos();
+          await fetchRelatos({ forceRefresh: true });
         }
 
         setShowReportModal(false);
+        setReportLimitNotice(null);
         setSubmitSuccessMessage(t.community.reportSuccess);
         setTimeout(() => setSubmitSuccessMessage(null), 3500);
       }
     } catch (err) {
       setSubmitError(
-        err instanceof Error
-          ? err.message
-          : 'Erro ao salvar relato. Tente novamente.'
+        formatFriendlySupabaseError(
+          err,
+          'Erro ao salvar relato. Tente novamente.'
+        )
       );
     } finally {
       setSubmitting(false);
@@ -492,17 +720,26 @@ export function DeviceCompatibilitySection({
   };
 
   const handleDeleteOwnReport = async (relatoId: string) => {
+    if (!currentUser || deletingReportId) return;
+    setDeletingReportId(relatoId);
     try {
       const { error } = await communitySupabase
         .from('relatos_desempenho')
         .delete()
-        .eq('id', relatoId);
+        .eq('id', relatoId)
+        .eq('user_id', currentUser.id);
 
       if (!error) {
+        invalidateCacheKey(`relatos:${jogoId}:`, true);
         setRelatos((prev) => prev.filter((item) => item.id !== relatoId));
+        setOwnRelatoRemote((prev) => (prev?.id === relatoId ? null : prev));
+        setReportLimitNotice(null);
+        setTotalRelatosCount((prev) => Math.max(0, prev - 1));
       }
     } catch {
       // Ignore silent errors
+    } finally {
+      setDeletingReportId(null);
     }
   };
 
@@ -591,10 +828,18 @@ export function DeviceCompatibilitySection({
         <button
           type="button"
           onClick={() => void handleClickReportButton()}
-          className="min-h-[44px] px-4 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] purple:from-[#7E22CE] purple:to-[#C026D3] purple:hover:from-[#6B21A8] purple:hover:to-[#A21CAF] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 shadow-md shadow-[#6366F1]/25 purple:shadow-[#9333EA]/30 active:scale-[0.98] transition-all shrink-0"
+          className={`min-h-[44px] px-4 rounded-xl text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 transition-all shrink-0 ${
+            ownRelato
+              ? 'bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:border-amber-500/50'
+              : 'bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] purple:from-[#7E22CE] purple:to-[#C026D3] purple:hover:from-[#6B21A8] purple:hover:to-[#A21CAF] text-white shadow-md shadow-[#6366F1]/25 purple:shadow-[#9333EA]/30 active:scale-[0.98]'
+          }`}
         >
           <MessageSquarePlus className="w-4 h-4 shrink-0" />
-          <span>{t.community.reportDevice}</span>
+          <span>
+            {ownRelato
+              ? t.community.alreadyReportedBtn
+              : t.community.reportDevice}
+          </span>
         </button>
       </div>
 
@@ -626,6 +871,33 @@ export function DeviceCompatibilitySection({
             <LogOut className="w-3.5 h-3.5" />
             <span>{t.community.signOut}</span>
           </button>
+        </div>
+      )}
+
+      {(ownRelato || reportLimitNotice) && ownRelato && (
+        <div className="rounded-2xl bg-amber-500/10 border border-amber-500/30 px-3.5 py-3 space-y-2.5">
+          <p className="text-xs font-medium text-amber-800 dark:text-amber-200 leading-relaxed">
+            {reportLimitNotice || t.community.oneReportLimitNotice}
+          </p>
+          <div className="flex flex-wrap items-center gap-2">
+            <button
+              type="button"
+              onClick={() => handleEditOwnReport(ownRelato)}
+              className="min-h-[34px] px-3 rounded-lg bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs font-semibold text-[#4F46E5] dark:text-[#A5B4FC] purple:text-[#D8B4FE] inline-flex items-center gap-1.5"
+            >
+              <Pencil className="w-3.5 h-3.5" />
+              <span>{t.community.edit}</span>
+            </button>
+            <button
+              type="button"
+              disabled={deletingReportId === ownRelato.id}
+              onClick={() => void handleDeleteOwnReport(ownRelato.id)}
+              className="min-h-[34px] px-3 rounded-lg bg-rose-500/12 border border-rose-500/30 text-xs font-semibold text-rose-600 dark:text-rose-300 inline-flex items-center gap-1.5 disabled:opacity-60"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{t.community.deletePreviousReport}</span>
+            </button>
+          </div>
         </div>
       )}
 
@@ -744,7 +1016,7 @@ export function DeviceCompatibilitySection({
           <p className="text-xs text-rose-500 dark:text-rose-400">{loadError}</p>
           <button
             type="button"
-            onClick={() => void fetchRelatos()}
+            onClick={() => void fetchRelatos({ forceRefresh: true })}
             className="min-h-[40px] px-4 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs font-semibold text-[#111827] dark:text-white hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60"
           >
             {t.community.retry}
@@ -870,6 +1142,23 @@ export function DeviceCompatibilitySection({
               </article>
             );
           })}
+
+          {relatos.length < totalRelatosCount && (
+            <div className="pt-1 flex justify-center">
+              <button
+                type="button"
+                disabled={loadingMoreRelatos}
+                onClick={() =>
+                  void fetchRelatos({ offset: relatos.length })
+                }
+                className="min-h-[42px] px-5 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 text-xs font-semibold text-[#4F46E5] dark:text-[#A5B4FC] purple:text-[#D8B4FE] disabled:opacity-60 transition-colors"
+              >
+                {loadingMoreRelatos
+                  ? 'Carregando mais...'
+                  : `Carregar mais relatos (${relatos.length}/${totalRelatosCount})`}
+              </button>
+            </div>
+          )}
         </div>
       )}
 
@@ -1265,13 +1554,13 @@ export function DeviceCompatibilitySection({
               </div>
             </div>
 
-            {/* Multi-select Observation Tags (max 6) */}
+            {/* Multi-select Observation Tags (max 15) */}
             <div className="space-y-2">
               <div className="flex items-center justify-between">
                 <label className="text-xs font-bold text-[#111827] dark:text-white">
                   {t.community.whatNoticed}{' '}
                   <span className="font-normal text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
-                    {t.community.upToSix}
+                    {t.community.upToFifteen}
                   </span>
                 </label>
                 <span className="text-[11px] font-mono-nums text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">

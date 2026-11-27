@@ -18,9 +18,17 @@ import {
   Search,
   Settings,
   SlidersHorizontal,
+  Smartphone,
   Trash2,
   X,
 } from 'lucide-react';
+import {
+  detectAppLinkType,
+  GridAppCard,
+  ListAppCard,
+  openAppLinkExternally,
+} from './components/AppCard';
+import { AppDetailsView } from './components/AppDetailsView';
 import {
   GridCollectionCard,
   ListCollectionCard,
@@ -47,6 +55,7 @@ import {
   restartCleanDownload,
 } from './services/downloadEngine';
 import type {
+  AppItem,
   CategoriaColecao,
   CategoriaJogoVinculo,
   DownloadMethod,
@@ -187,6 +196,13 @@ export default function App() {
     null
   );
   const [collectionSearchQuery, setCollectionSearchQuery] = useState<string>('');
+
+  const [apps, setApps] = useState<AppItem[]>([]);
+  const [appsLoading, setAppsLoading] = useState<boolean>(true);
+  const [appsSearchQuery, setAppsSearchQuery] = useState<string>('');
+  const [selectedAppCategory, setSelectedAppCategory] =
+    useState<string>('Todas');
+  const [selectedApp, setSelectedApp] = useState<AppItem | null>(null);
 
   const [activeTab, setActiveTab] = useState<TabId>('inicio');
   const [selectedGame, setSelectedGame] = useState<Jogo | null>(null);
@@ -333,197 +349,251 @@ export default function App() {
     }
   }, [communityLoggedIn, jogos]);
 
+  const updateCheckInFlightRef = useRef<
+    Promise<'up-to-date' | 'update-available' | 'error'> | null
+  >(null);
+
   const checkForUpdatesNow = useCallback(
     async (
       showPromptIfAvailable = true
     ): Promise<'up-to-date' | 'update-available' | 'error'> => {
-      try {
-        const { data, error: configError } = await supabase
-          .from('config')
-          .select('*')
-          .limit(1);
+      if (updateCheckInFlightRef.current) {
+        return updateCheckInFlightRef.current;
+      }
 
-        if (configError) return 'error';
-        if (!data || data.length === 0) return 'up-to-date';
+      const runCheck = async (): Promise<
+        'up-to-date' | 'update-available' | 'error'
+      > => {
+        try {
+          const { data, error: configError } = await supabase
+            .from('config')
+            .select('*')
+            .limit(1);
 
-        const row = data[0] as {
-          id?: string | number | null;
-          versao_atual?: string | number | null;
-          link_apk?: string | null;
-          discord?: string | null;
-          link_discord?: string | null;
-          discord_url?: string | null;
-        };
+          if (configError) return 'error';
+          if (!data || data.length === 0) return 'up-to-date';
 
-        const configDiscord =
-          (isValidHttpUrl(row.discord) && row.discord.trim()) ||
-          (isValidHttpUrl(row.link_discord) && row.link_discord.trim()) ||
-          (isValidHttpUrl(row.discord_url) && row.discord_url.trim()) ||
-          null;
-        if (configDiscord) {
-          setDiscordUrl((prev) => prev || configDiscord);
-        }
+          const row = data[0] as {
+            id?: string | number | null;
+            versao_atual?: string | number | null;
+            link_apk?: string | null;
+            discord?: string | null;
+            link_discord?: string | null;
+            discord_url?: string | null;
+          };
 
-        const configLinkApk = isValidHttpUrl(row.link_apk)
-          ? row.link_apk.trim()
-          : null;
+          const configDiscord =
+            (isValidHttpUrl(row.discord) && row.discord.trim()) ||
+            (isValidHttpUrl(row.link_discord) && row.link_discord.trim()) ||
+            (isValidHttpUrl(row.discord_url) && row.discord_url.trim()) ||
+            null;
+          if (configDiscord) {
+            setDiscordUrl((prev) => prev || configDiscord);
+          }
 
-        const rawRemoteVersion = row.versao_atual;
-        const versaoAtual =
-          typeof rawRemoteVersion === 'string'
-            ? rawRemoteVersion.trim()
-            : rawRemoteVersion !== null && rawRemoteVersion !== undefined
-            ? String(rawRemoteVersion).trim()
-            : '';
+          const configLinkApk = isValidHttpUrl(row.link_apk)
+            ? row.link_apk.trim()
+            : null;
 
-        const ensurePendingAcceptanceRow = async (
-          targetVersion: string,
-          apkUrl: string | null
-        ) => {
-          try {
-            const { data: existing, error: existingErr } = await supabase
-              .from('aceitar')
-              .select('id, versao')
-              .eq('versao', targetVersion)
-              .limit(1);
+          const rawRemoteVersion = row.versao_atual;
+          const versaoAtual =
+            typeof rawRemoteVersion === 'string'
+              ? rawRemoteVersion.trim()
+              : rawRemoteVersion !== null && rawRemoteVersion !== undefined
+              ? String(rawRemoteVersion).trim()
+              : '';
 
-            if (existingErr) return;
-            if (!existing || existing.length === 0) {
-              await supabase.from('aceitar').insert({
-                versao: targetVersion,
-                link_apk: apkUrl,
-                aceito: false,
-              });
+          const ensurePendingAcceptanceRow = async (
+            targetVersion: string,
+            apkUrl: string | null
+          ) => {
+            const cleanTarget = targetVersion.trim();
+            if (!cleanTarget) return;
+
+            try {
+              const { data: existing, error: existingErr } = await supabase
+                .from('aceitar')
+                .select('id, versao')
+                .eq('versao', cleanTarget)
+                .limit(1);
+
+              if (existingErr) {
+                console.warn(
+                  '[DroidPort Update] Erro ao consultar tabela aceitar:',
+                  existingErr.message
+                );
+                return;
+              }
+
+              if (!existing || existing.length === 0) {
+                const { error: insertErr } = await supabase
+                  .from('aceitar')
+                  .insert({
+                    versao: cleanTarget,
+                    link_apk: apkUrl,
+                    aceito: false,
+                  });
+
+                if (insertErr && insertErr.code !== '23505') {
+                  console.warn(
+                    '[DroidPort Update] Não foi possível criar solicitação na tabela aceitar:',
+                    insertErr.message
+                  );
+                }
+              }
+            } catch {
+              // Tabela `aceitar` ainda não criada ou protegida por RLS/GRANT
             }
-          } catch {
-            // Tabela `aceitar` ainda não criada ou protegida por RLS
-          }
-        };
+          };
 
-        // Se a APP_VERSION do aplicativo instalado for MAIOR que a versão salva no Supabase,
-        // sincroniza automaticamente a tabela `config` para igualar à APP_VERSION atual
-        // e garante o registro da solicitação pendente na tabela `aceitar`.
-        if (!versaoAtual || isRemoteVersionGreater(APP_VERSION, versaoAtual)) {
-          try {
-            const updateBuilder = supabase
-              .from('config')
-              .update({ versao_atual: APP_VERSION });
+          // Se a APP_VERSION do aplicativo instalado for MAIOR que a versão salva no Supabase,
+          // sincroniza a tabela `config` e garante a solicitação pendente na tabela `aceitar`.
+          if (!versaoAtual || isRemoteVersionGreater(APP_VERSION, versaoAtual)) {
+            try {
+              const updateBuilder = supabase
+                .from('config')
+                .update({ versao_atual: APP_VERSION });
 
-            if (row.id !== undefined && row.id !== null) {
-              await updateBuilder.eq('id', row.id);
-            } else if (rawRemoteVersion !== undefined && rawRemoteVersion !== null) {
-              await updateBuilder.eq('versao_atual', rawRemoteVersion);
-            } else if (typeof row.link_apk === 'string' && row.link_apk) {
-              await updateBuilder.eq('link_apk', row.link_apk);
+              let updateRes;
+              if (row.id !== undefined && row.id !== null) {
+                updateRes = await updateBuilder.eq('id', row.id);
+              } else if (
+                rawRemoteVersion !== undefined &&
+                rawRemoteVersion !== null
+              ) {
+                updateRes = await updateBuilder.eq(
+                  'versao_atual',
+                  rawRemoteVersion
+                );
+              } else if (typeof row.link_apk === 'string' && row.link_apk) {
+                updateRes = await updateBuilder.eq('link_apk', row.link_apk);
+              }
+
+              if (updateRes?.error) {
+                console.warn(
+                  '[DroidPort Update] Sem permissão para atualizar config.versao_atual:',
+                  updateRes.error.message
+                );
+              }
+            } catch {
+              // Ignora silenciosamente caso RLS/GRANT bloqueie escrita anônima
             }
-          } catch {
-            // Ignora silenciosamente caso RLS bloqueie escrita anônima
+
+            await ensurePendingAcceptanceRow(APP_VERSION, configLinkApk);
+
+            try {
+              localStorage.setItem(INSTALLED_VERSION_STORAGE_KEY, APP_VERSION);
+            } catch {
+              // Ignore storage errors
+            }
           }
 
-          await ensurePendingAcceptanceRow(APP_VERSION, configLinkApk);
+          // Consulta a tabela `public.aceitar` para saber se a atualização já foi aceita pelo Admin
+          // e obter a log diretamente da coluna `release_notes` da mesma linha da versão aprovada
+          const { data: aceitarRows, error: aceitarError } = await supabase
+            .from('aceitar')
+            .select('*')
+            .order('created_at', { ascending: false })
+            .order('id', { ascending: false })
+            .limit(25);
 
-          try {
-            localStorage.setItem(INSTALLED_VERSION_STORAGE_KEY, APP_VERSION);
-          } catch {
-            // Ignore storage errors
+          if (!aceitarError) {
+            const parsedRequests = (aceitarRows ?? [])
+              .map((entry) => {
+                const rec = entry as Record<string, unknown>;
+                const rawVer = rec.versao ?? rec.versao_atual;
+                const ver =
+                  typeof rawVer === 'string'
+                    ? rawVer.trim()
+                    : rawVer !== null && rawVer !== undefined
+                    ? String(rawVer).trim()
+                    : '';
+                const rawAceito = rec.aceito ?? rec.aprovado;
+                const isAccepted =
+                  rawAceito === true ||
+                  rawAceito === 'true' ||
+                  rec.status === 'aceito';
+                const linkApk = isValidHttpUrl(rec.link_apk)
+                  ? rec.link_apk.trim()
+                  : configLinkApk;
+                const rawNotes =
+                  rec.release_notes ?? rec.notes ?? rec.log ?? rec.changelog;
+                const releaseNotes =
+                  typeof rawNotes === 'string' && rawNotes.trim()
+                    ? rawNotes.trim()
+                    : undefined;
+
+                return {
+                  versao: ver,
+                  aceito: isAccepted,
+                  linkApk,
+                  releaseNotes,
+                };
+              })
+              .filter((item) => Boolean(item.versao));
+
+            // Só libera o modal de atualização se houver uma versão MAIOR já marcada como aceito = true
+            const approvedUpdate = parsedRequests.find(
+              (item) =>
+                item.aceito &&
+                isRemoteVersionGreater(item.versao, APP_VERSION) &&
+                Boolean(item.linkApk)
+            );
+
+            if (approvedUpdate && approvedUpdate.linkApk) {
+              if (showPromptIfAvailable) {
+                setAvailableUpdate({
+                  versaoAtual: approvedUpdate.versao,
+                  linkApk: approvedUpdate.linkApk,
+                  releaseNotes: approvedUpdate.releaseNotes,
+                });
+              }
+              return 'update-available';
+            }
+
+            // Se a tabela `config` já tiver uma versão maior ainda sem solicitação em `aceitar`,
+            // cria a solicitação pendente (`aceito: false`) para aparecer no app Admin.
+            if (
+              versaoAtual &&
+              isRemoteVersionGreater(versaoAtual, APP_VERSION)
+            ) {
+              const alreadyListed = parsedRequests.some(
+                (item) => item.versao === versaoAtual
+              );
+              if (!alreadyListed) {
+                await ensurePendingAcceptanceRow(versaoAtual, configLinkApk);
+              }
+            }
+
+            return 'up-to-date';
           }
 
-          return 'up-to-date';
-        }
-
-        // Consulta a tabela `public.aceitar` para saber se a atualização já foi aceita pelo Admin
-        const { data: aceitarRows, error: aceitarError } = await supabase
-          .from('aceitar')
-          .select('*')
-          .order('created_at', { ascending: false })
-          .order('id', { ascending: false })
-          .limit(25);
-
-        if (!aceitarError) {
-          const parsedRequests = (aceitarRows ?? [])
-            .map((entry) => {
-              const rec = entry as Record<string, unknown>;
-              const rawVer = rec.versao ?? rec.versao_atual;
-              const ver =
-                typeof rawVer === 'string'
-                  ? rawVer.trim()
-                  : rawVer !== null && rawVer !== undefined
-                  ? String(rawVer).trim()
-                  : '';
-              const rawAceito = rec.aceito ?? rec.aprovado;
-              const isAccepted =
-                rawAceito === true ||
-                rawAceito === 'true' ||
-                rec.status === 'aceito';
-              const linkApk = isValidHttpUrl(rec.link_apk)
-                ? rec.link_apk.trim()
-                : configLinkApk;
-              const releaseNotes =
-                typeof rec.release_notes === 'string' &&
-                rec.release_notes.trim()
-                  ? rec.release_notes.trim()
-                  : undefined;
-
-              return {
-                versao: ver,
-                aceito: isAccepted,
-                linkApk,
-                releaseNotes,
-              };
-            })
-            .filter((item) => Boolean(item.versao));
-
-          // Só libera o modal de atualização se houver uma versão MAIOR já marcada como aceito = true
-          const approvedUpdate = parsedRequests.find(
-            (item) =>
-              item.aceito &&
-              isRemoteVersionGreater(item.versao, APP_VERSION) &&
-              Boolean(item.linkApk)
-          );
-
-          if (approvedUpdate && approvedUpdate.linkApk) {
+          // Fallback caso a tabela `aceitar` ainda não tenha sido criada no Supabase
+          if (
+            versaoAtual &&
+            isRemoteVersionGreater(versaoAtual, APP_VERSION) &&
+            configLinkApk
+          ) {
             if (showPromptIfAvailable) {
               setAvailableUpdate({
-                versaoAtual: approvedUpdate.versao,
-                linkApk: approvedUpdate.linkApk,
-                releaseNotes: approvedUpdate.releaseNotes,
+                versaoAtual,
+                linkApk: configLinkApk,
               });
             }
             return 'update-available';
           }
 
-          // Se a tabela `config` já tiver uma versão maior ainda sem solicitação em `aceitar`,
-          // cria a solicitação pendente (`aceito: false`) para aparecer no app Admin.
-          if (isRemoteVersionGreater(versaoAtual, APP_VERSION)) {
-            const alreadyListed = parsedRequests.some(
-              (item) => item.versao === versaoAtual
-            );
-            if (!alreadyListed) {
-              await ensurePendingAcceptanceRow(versaoAtual, configLinkApk);
-            }
-          }
-
           return 'up-to-date';
+        } catch {
+          return 'error';
+        } finally {
+          updateCheckInFlightRef.current = null;
         }
+      };
 
-        // Fallback caso a tabela `aceitar` ainda não tenha sido criada no Supabase
-        if (
-          isRemoteVersionGreater(versaoAtual, APP_VERSION) &&
-          configLinkApk
-        ) {
-          if (showPromptIfAvailable) {
-            setAvailableUpdate({
-              versaoAtual,
-              linkApk: configLinkApk,
-            });
-          }
-          return 'update-available';
-        }
-
-        return 'up-to-date';
-      } catch {
-        return 'error';
-      }
+      const promise = runCheck();
+      updateCheckInFlightRef.current = promise;
+      return promise;
     },
     []
   );
@@ -643,6 +713,44 @@ export default function App() {
       void fetchCategorias();
     }
   }, [activeTab, fetchCategorias]);
+
+  // Fetch apps catalog (`public.apps`) from Supabase
+  const fetchApps = useCallback(async () => {
+    setAppsLoading(true);
+    try {
+      let appsData: AppItem[] = [];
+      const appsOrdered = await supabase
+        .from('apps')
+        .select('*')
+        .order('ordem', { ascending: true })
+        .order('created_at', { ascending: false });
+
+      if (!appsOrdered.error) {
+        appsData = (appsOrdered.data as AppItem[]) || [];
+      } else {
+        const appsFallback = await supabase.from('apps').select('*');
+        if (!appsFallback.error) {
+          appsData = (appsFallback.data as AppItem[]) || [];
+        }
+      }
+
+      setApps(appsData.filter((item) => Boolean(item.nome && item.link_url)));
+    } catch {
+      // Tabela `apps` ainda não criada ou vazia
+    } finally {
+      setAppsLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void fetchApps();
+  }, [fetchApps]);
+
+  useEffect(() => {
+    if (activeTab === 'apps') {
+      void fetchApps();
+    }
+  }, [activeTab, fetchApps]);
 
   // Fetch official Discord invite link (most recent row) from Supabase `public.discord` table
   const fetchDiscordLink = useCallback(async () => {
@@ -1128,9 +1236,55 @@ export default function App() {
     );
   }, [resolvedCollections, selectedCollectionId]);
 
+  const appCategories = useMemo(() => {
+    const set = new Set<string>();
+    for (const app of apps) {
+      for (const cat of parseCategories(app.categoria)) {
+        set.add(cat);
+      }
+    }
+    return Array.from(set).sort((a, b) => a.localeCompare(b, 'pt-BR'));
+  }, [apps]);
+
+  const filteredApps = useMemo(() => {
+    const q = appsSearchQuery.trim().toLowerCase();
+    return apps.filter((app) => {
+      const matchesSearch =
+        !q ||
+        app.nome.toLowerCase().includes(q) ||
+        (app.categoria && app.categoria.toLowerCase().includes(q)) ||
+        (app.descricao && app.descricao.toLowerCase().includes(q));
+
+      if (!matchesSearch) return false;
+
+      if (selectedAppCategory !== 'Todas') {
+        const cats = parseCategories(app.categoria);
+        if (!cats.includes(selectedAppCategory)) return false;
+      }
+
+      return true;
+    });
+  }, [apps, appsSearchQuery, selectedAppCategory]);
+
   const downloadList = useMemo(() => {
     return Object.values(downloads).sort((a, b) => b.updatedAt - a.updatedAt);
   }, [downloads]);
+
+  // App Details View Overlay
+  if (selectedApp) {
+    return (
+      <>
+        <AppDetailsView app={selectedApp} onBack={() => setSelectedApp(null)} />
+        {availableUpdate && (
+          <UpdateModal
+            update={availableUpdate}
+            onUpdateNow={handleUpdateNow}
+            onDismiss={() => setAvailableUpdate(null)}
+          />
+        )}
+      </>
+    );
+  }
 
   // Game Details View Overlay
   if (selectedGame) {
@@ -1448,13 +1602,14 @@ export default function App() {
             onClick={() => {
               void fetchJogos();
               void fetchCategorias();
+              void fetchApps();
             }}
             aria-label={t.catalog.refreshCatalog}
             className="min-w-[44px] min-h-[44px] flex items-center justify-center rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 transition-colors"
           >
             <RefreshCw
               className={`w-4 h-4 ${
-                loading || categoriasLoading
+                loading || categoriasLoading || appsLoading
                   ? 'animate-spin text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC]'
                   : ''
               }`}
@@ -1659,6 +1814,130 @@ export default function App() {
           </div>
         )}
 
+        {/* Tab: Apps (Apps recomendados configuráveis pelo Admin) */}
+        {activeTab === 'apps' && (
+          <div className="space-y-6">
+            <div className="relative">
+              <Search className="w-5 h-5 text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] absolute left-4 top-1/2 -translate-y-1/2 pointer-events-none" />
+              <input
+                type="search"
+                value={appsSearchQuery}
+                onChange={(e) => setAppsSearchQuery(e.target.value)}
+                placeholder={t.apps.searchPlaceholder}
+                aria-label={t.apps.searchPlaceholder}
+                className="w-full h-12 pl-12 pr-11 rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-sm text-[#111827] dark:text-white placeholder-[#525866] dark:placeholder-[#9CA3AF] purple:placeholder-[#C4B5FD]/75 focus:outline-none focus:border-[#6366F1] purple:focus:border-[#C084FC] transition-colors"
+              />
+              {appsSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setAppsSearchQuery('')}
+                  aria-label="Limpar busca"
+                  className="absolute right-1.5 top-1/2 -translate-y-1/2 min-w-[40px] min-h-[40px] flex items-center justify-center rounded-xl text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD] hover:text-[#111827] dark:hover:text-white"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              )}
+            </div>
+
+            {appCategories.length > 0 && (
+              <div className="flex items-center gap-2 overflow-x-auto no-scrollbar pb-1">
+                {['Todas', ...appCategories].map((cat) => {
+                  const isSelected = selectedAppCategory === cat;
+                  const label = cat === 'Todas' ? t.catalog.allCategories : cat;
+                  return (
+                    <button
+                      key={cat}
+                      type="button"
+                      onClick={() => setSelectedAppCategory(cat)}
+                      className={`min-h-[38px] px-3.5 rounded-xl border text-xs font-semibold whitespace-nowrap shrink-0 transition-colors ${
+                        isSelected
+                          ? 'bg-[#6366F1] purple:bg-[#9333EA] border-[#6366F1] purple:border-[#A855F7] text-white'
+                          : 'bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-[#374151] dark:text-[#D1D5DB] purple:text-[#DDD6FE] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60'
+                      }`}
+                    >
+                      {label}
+                    </button>
+                  );
+                })}
+              </div>
+            )}
+
+            <section className="space-y-3">
+              <div className="flex items-center justify-between gap-3">
+                <h2 className="text-base sm:text-lg font-bold text-[#111827] dark:text-white">
+                  {t.apps.allApps} ({filteredApps.length})
+                </h2>
+                {renderViewToggle()}
+              </div>
+
+              {appsLoading ? (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {Array.from({ length: 4 }).map((_, idx) => (
+                    <div
+                      key={idx}
+                      className="h-26 rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] animate-pulse"
+                    />
+                  ))}
+                </div>
+              ) : filteredApps.length === 0 ? (
+                <div className="rounded-2xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-8 text-center space-y-2">
+                  <Smartphone className="w-8 h-8 text-[#6366F1]/70 purple:text-[#C084FC]/80 mx-auto" />
+                  <p className="text-sm font-medium text-[#111827] dark:text-white">
+                    {appsSearchQuery.trim() || selectedAppCategory !== 'Todas'
+                      ? t.apps.emptyFilter
+                      : t.apps.emptyTitle}
+                  </p>
+                  {(appsSearchQuery.trim() ||
+                    selectedAppCategory !== 'Todas') && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setAppsSearchQuery('');
+                        setSelectedAppCategory('Todas');
+                      }}
+                      className="mt-2 min-h-[44px] px-4 rounded-xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] text-xs font-semibold text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] hover:border-[#6366F1]/50 purple:hover:border-[#A855F7]/60 transition-colors"
+                    >
+                      {t.catalog.clearFilters}
+                    </button>
+                  )}
+                </div>
+              ) : viewMode === 'grade' ? (
+                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                  {filteredApps.map((app) => (
+                    <GridAppCard
+                      key={app.id}
+                      app={app}
+                      onSelect={setSelectedApp}
+                      onQuickOpen={(item) =>
+                        void openAppLinkExternally(
+                          item.link_url,
+                          detectAppLinkType(item)
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+              ) : (
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {filteredApps.map((app) => (
+                    <ListAppCard
+                      key={app.id}
+                      app={app}
+                      onSelect={setSelectedApp}
+                      onQuickOpen={(item) =>
+                        void openAppLinkExternally(
+                          item.link_url,
+                          detectAppLinkType(item)
+                        )
+                      }
+                    />
+                  ))}
+                </div>
+              )}
+            </section>
+          </div>
+        )}
+
         {/* Tab: Favoritos */}
         {activeTab === 'favoritos' && (
           <section className="space-y-4">
@@ -1734,12 +2013,13 @@ export default function App() {
         aria-label="Navegação principal"
         className="fixed bottom-0 left-0 right-0 z-40 bg-white/95 dark:bg-[#1B1924]/95 purple:bg-[#20143A]/95 backdrop-blur-md border-t border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] pb-safe"
       >
-        <div className="max-w-3xl mx-auto grid grid-cols-6 items-center h-16 px-1">
+        <div className="max-w-3xl mx-auto grid grid-cols-7 items-center h-16 px-0.5">
           {(
             [
               { id: 'inicio', label: t.nav.inicio, icon: Home },
               { id: 'jogos', label: t.nav.jogos, icon: Gamepad2 },
               { id: 'categoria', label: t.nav.categoria, icon: Layers },
+              { id: 'apps', label: t.nav.apps, icon: Smartphone },
               { id: 'favoritos', label: t.nav.favoritos, icon: Heart },
               { id: 'historico', label: t.nav.historico, icon: History },
               { id: 'configuracoes', label: t.nav.configuracoes, icon: Settings },
@@ -1766,7 +2046,7 @@ export default function App() {
               >
                 <div className="relative">
                   <Icon
-                    className={`w-[18px] h-[18px] sm:w-5 sm:h-5 ${
+                    className={`w-[17px] h-[17px] sm:w-5 sm:h-5 ${
                       isActive && item.id === 'favoritos'
                         ? 'fill-[#6366F1] dark:fill-[#8B5CF6] purple:fill-[#C084FC]'
                         : ''

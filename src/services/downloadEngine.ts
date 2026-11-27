@@ -7,45 +7,36 @@ import {
   saveDownloadTask,
 } from '../utils/downloadDb';
 import { extractFileNameFromUrl, sanitizeFolderName } from '../utils/formatters';
+import {
+  buildSafeAndroidP2PIntentUrl,
+  buildSafeArchiveServerUrl,
+  LIBRETORRENT_PLAY_STORE_URL,
+  normalizeArchiveOrgDownloadUrl,
+  parseSafeArchiveOrgDownloadUrl,
+  sanitizeDirectDownloadUrl,
+  sanitizeMagnetUri,
+  sanitizeP2PTorrentUrl,
+} from '../utils/urlSecurity';
 
 type TaskUpdateCallback = (task: DownloadTask) => void;
 
 const ARCHIVE_METADATA_TIMEOUT_MS = 3000;
 
+export { LIBRETORRENT_PLAY_STORE_URL };
+
 function normalizeArchiveOrgUrl(rawUrl: string): string {
-  return rawUrl.replace(/archive\.org\/details\//i, 'archive.org/download/');
+  return normalizeArchiveOrgDownloadUrl(rawUrl);
 }
 
-function parseArchiveOrgDownloadUrl(
-  rawUrl: string
-): { itemId: string; filePath: string } | null {
-  try {
-    const parsed = new URL(rawUrl);
-    if (!parsed.hostname.toLowerCase().includes('archive.org')) {
-      return null;
-    }
-    const idx = parsed.pathname.indexOf('/download/');
-    if (idx === -1) {
-      return null;
-    }
-    const remainder = parsed.pathname.slice(idx + '/download/'.length);
-    const segments = remainder.split('/').filter(Boolean);
-    if (segments.length < 2) {
-      return null;
-    }
-    const itemId = decodeURIComponent(segments[0]);
-    const filePath = segments.slice(1).join('/');
-    return { itemId, filePath };
-  } catch {
+async function resolveDirectDownloadUrl(rawUrl: string): Promise<string | null> {
+  const safeDirectUrl = sanitizeDirectDownloadUrl(rawUrl);
+  if (!safeDirectUrl) {
     return null;
   }
-}
 
-async function resolveDirectDownloadUrl(rawUrl: string): Promise<string> {
-  const normalizedUrl = normalizeArchiveOrgUrl(rawUrl.trim());
-  const parsed = parseArchiveOrgDownloadUrl(normalizedUrl);
+  const parsed = parseSafeArchiveOrgDownloadUrl(safeDirectUrl);
   if (!parsed) {
-    return normalizedUrl;
+    return safeDirectUrl;
   }
 
   const controller = new AbortController();
@@ -58,7 +49,7 @@ async function resolveDirectDownloadUrl(rawUrl: string): Promise<string> {
       signal: controller.signal,
     });
     if (!response.ok) {
-      return normalizedUrl;
+      return parsed.normalizedUrl;
     }
 
     const data = (await response.json()) as {
@@ -66,38 +57,34 @@ async function resolveDirectDownloadUrl(rawUrl: string): Promise<string> {
       dir?: unknown;
     };
 
-    if (
-      typeof data.d1 === 'string' &&
-      data.d1.trim() &&
-      typeof data.dir === 'string' &&
-      data.dir.trim()
-    ) {
-      const server = data.d1.trim();
-      const rawDir = data.dir.trim();
-      const dir = (rawDir.startsWith('/') ? rawDir : `/${rawDir}`).replace(/\/+$/, '');
-      const filePath = parsed.filePath.replace(/^\/+/, '');
-      return `https://${server}${dir}/${filePath}`;
-    }
-
-    return normalizedUrl;
+    const resolvedServerUrl = buildSafeArchiveServerUrl(
+      data.d1,
+      data.dir,
+      parsed.filePath
+    );
+    return resolvedServerUrl ?? parsed.normalizedUrl;
   } catch {
-    return normalizedUrl;
+    return parsed.normalizedUrl;
   } finally {
     clearTimeout(timeoutId);
   }
 }
 
-async function openUrlInSystemBrowser(url: string): Promise<void> {
+async function openUrlInSystemBrowser(url: string): Promise<boolean> {
+  const safeUrl = sanitizeDirectDownloadUrl(url);
+  if (!safeUrl) return false;
+
   try {
-    await Browser.open({ url });
+    await Browser.open({ url: safeUrl });
+    return true;
   } catch {
-    window.open(url, '_system');
+    const opened = window.open(safeUrl, '_blank', 'noopener,noreferrer');
+    if (!opened) {
+      window.open(safeUrl, '_system');
+    }
+    return true;
   }
 }
-
-const LIBRETORRENT_PACKAGE = 'org.proninyaroslav.libretorrent';
-export const LIBRETORRENT_PLAY_STORE_URL =
-  'https://play.google.com/store/apps/details?id=org.proninyaroslav.libretorrent';
 
 export function isAndroidDevice(): boolean {
   if (Capacitor.getPlatform() === 'android') {
@@ -109,26 +96,8 @@ export function isAndroidDevice(): boolean {
   return false;
 }
 
-export function buildAndroidP2PIntentUrl(rawUrl: string): string {
-  const trimmed = rawUrl.trim();
-  const encodedFallback = encodeURIComponent(LIBRETORRENT_PLAY_STORE_URL);
-
-  if (/^magnet:/i.test(trimmed)) {
-    const magnetPayload = trimmed.replace(/^magnet:(\/\/)?/i, '');
-    return `intent://${magnetPayload}#Intent;scheme=magnet;package=${LIBRETORRENT_PACKAGE};S.browser_fallback_url=${encodedFallback};end`;
-  }
-
-  if (/^https:\/\//i.test(trimmed)) {
-    const urlWithoutHttps = trimmed.replace(/^https:\/\//i, '');
-    return `intent://${urlWithoutHttps}#Intent;scheme=https;type=application/x-bittorrent;package=${LIBRETORRENT_PACKAGE};S.browser_fallback_url=${encodedFallback};end`;
-  }
-
-  if (/^http:\/\//i.test(trimmed)) {
-    const urlWithoutHttp = trimmed.replace(/^http:\/\//i, '');
-    return `intent://${urlWithoutHttp}#Intent;scheme=http;type=application/x-bittorrent;package=${LIBRETORRENT_PACKAGE};S.browser_fallback_url=${encodedFallback};end`;
-  }
-
-  return trimmed;
+export function buildAndroidP2PIntentUrl(rawUrl: string): string | null {
+  return buildSafeAndroidP2PIntentUrl(rawUrl);
 }
 
 export async function copyTextToClipboard(text: string): Promise<boolean> {
@@ -155,29 +124,37 @@ export async function copyTextToClipboard(text: string): Promise<boolean> {
   }
 }
 
-export function openP2PIntent(targetUrl?: string | null): void {
-  if (!targetUrl) return;
-  const trimmed = targetUrl.trim();
-  if (!trimmed) return;
+export function openP2PIntent(targetUrl?: string | null): boolean {
+  const safeTarget = sanitizeP2PTorrentUrl(targetUrl);
+  if (!safeTarget) return false;
 
   if (isAndroidDevice()) {
-    const intentUrl = buildAndroidP2PIntentUrl(trimmed);
+    const intentUrl = buildSafeAndroidP2PIntentUrl(safeTarget);
+    if (!intentUrl) return false;
     window.location.href = intentUrl;
-    return;
+    return true;
   }
 
-  if (/^https?:\/\//i.test(trimmed)) {
-    window.open(trimmed, '_blank', 'noopener,noreferrer');
-    return;
+  if (sanitizeDirectDownloadUrl(safeTarget)) {
+    window.open(safeTarget, '_blank', 'noopener,noreferrer');
+    return true;
   }
 
-  window.location.href = trimmed;
+  if (sanitizeMagnetUri(safeTarget)) {
+    window.location.href = safeTarget;
+    return true;
+  }
+
+  return false;
 }
 
-export async function openSystemDownloadManager(url?: string | null): Promise<void> {
-  if (!url) return;
+export async function openSystemDownloadManager(
+  url?: string | null
+): Promise<boolean> {
+  if (!url) return false;
   const directUrl = await resolveDirectDownloadUrl(url);
-  await openUrlInSystemBrowser(directUrl);
+  if (!directUrl) return false;
+  return openUrlInSystemBrowser(directUrl);
 }
 
 export async function startHybridDownload(
@@ -187,12 +164,12 @@ export async function startHybridDownload(
   const now = Date.now();
 
   if (task.method === 'p2p' || task.mode === 'p2p-intent') {
-    const torrentUrl = task.torrent_url?.trim();
-    if (!torrentUrl) {
+    const safeTorrentUrl = sanitizeP2PTorrentUrl(task.torrent_url);
+    if (!safeTorrentUrl) {
       const errTask: DownloadTask = {
         ...task,
         status: 'error',
-        errorMessage: 'Nenhum link P2P disponível para este arquivo.',
+        errorMessage: 'Link P2P inválido ou bloqueado por segurança.',
         updatedAt: now,
       };
       await saveDownloadTask(errTask);
@@ -200,10 +177,22 @@ export async function startHybridDownload(
       return;
     }
 
-    openP2PIntent(torrentUrl);
+    const opened = openP2PIntent(safeTorrentUrl);
+    if (!opened) {
+      const errTask: DownloadTask = {
+        ...task,
+        status: 'error',
+        errorMessage: 'Não foi possível abrir o link P2P com segurança.',
+        updatedAt: now,
+      };
+      await saveDownloadTask(errTask);
+      onUpdate(errTask);
+      return;
+    }
 
     const dispatchedP2P: DownloadTask = {
       ...task,
+      torrent_url: safeTorrentUrl,
       status: 'completed',
       mode: 'p2p-intent',
       method: 'p2p',
@@ -221,13 +210,15 @@ export async function startHybridDownload(
     return;
   }
 
-  const url = task.webseed_url || task.torrent_url;
-  if (!url) {
+  const rawUrl = task.webseed_url || task.torrent_url;
+  const safeInputUrl = sanitizeDirectDownloadUrl(rawUrl);
+  if (!safeInputUrl) {
     const errTask: DownloadTask = {
       ...task,
       status: 'error',
       speedBytesPerSec: 0,
-      errorMessage: 'Nenhum link de download disponível para este arquivo.',
+      errorMessage:
+        'Link de download inválido ou inseguro (HTTPS obrigatório).',
       updatedAt: now,
     };
     await saveDownloadTask(errTask);
@@ -236,14 +227,26 @@ export async function startHybridDownload(
   }
 
   const nomeLimpoDoPort = sanitizeFolderName(task.titulo);
-  const normalizedUrl = normalizeArchiveOrgUrl(url.trim());
+  const normalizedUrl = normalizeArchiveOrgUrl(safeInputUrl);
   const nomeRealDoArquivo = extractFileNameFromUrl(normalizedUrl, nomeLimpoDoPort);
 
   const directUrl = await resolveDirectDownloadUrl(normalizedUrl);
-  await openUrlInSystemBrowser(directUrl);
+  if (!directUrl || !(await openUrlInSystemBrowser(directUrl))) {
+    const errTask: DownloadTask = {
+      ...task,
+      status: 'error',
+      speedBytesPerSec: 0,
+      errorMessage: 'Não foi possível validar o servidor de download.',
+      updatedAt: now,
+    };
+    await saveDownloadTask(errTask);
+    onUpdate(errTask);
+    return;
+  }
 
   const dispatchedTask: DownloadTask = {
     ...task,
+    webseed_url: directUrl,
     status: 'completed',
     mode: 'system-browser',
     method: 'direct',

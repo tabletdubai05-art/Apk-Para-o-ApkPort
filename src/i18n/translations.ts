@@ -26,9 +26,27 @@ export interface AppTranslations {
     inicio: string;
     jogos: string;
     categoria: string;
+    apps: string;
     favoritos: string;
     historico: string;
     configuracoes: string;
+  };
+  apps: {
+    title: string;
+    searchPlaceholder: string;
+    allApps: string;
+    emptyTitle: string;
+    emptyFilter: string;
+    linkTypeDownload: string;
+    linkTypeSite: string;
+    linkTypePlayStore: string;
+    openPlayStore: string;
+    openSite: string;
+    downloadApp: string;
+    aboutApp: string;
+    openLink: string;
+    secondaryLinkDefault: string;
+    quickLinkNote: string;
   };
   collections: {
     title: string;
@@ -190,7 +208,10 @@ export interface AppTranslations {
     doesNotRun: string;
     perfect: string;
     whatNoticed: string;
-    upToSix: string;
+    upToFifteen: string;
+    oneReportLimitNotice: string;
+    alreadyReportedBtn: string;
+    deletePreviousReport: string;
     submitReport: string;
     submittingReport: string;
     saveChanges: string;
@@ -201,6 +222,7 @@ export interface AppTranslations {
   updateModal: {
     titlePrefix: string;
     subtitle: string;
+    changelogTitle: string;
     updateNow: string;
     later: string;
   };
@@ -212,9 +234,27 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       inicio: 'Início',
       jogos: 'Jogos',
       categoria: 'Categoria',
+      apps: 'Apps',
       favoritos: 'Favoritos',
       historico: 'Histórico',
       configuracoes: 'Configurações',
+    },
+    apps: {
+      title: 'Apps',
+      searchPlaceholder: 'Pesquisar apps (ex: Tomato, utilidades)...',
+      allApps: 'Todos os apps',
+      emptyTitle: 'Nenhum app adicionado ainda.',
+      emptyFilter: 'Nenhum app encontrado para essa busca.',
+      linkTypeDownload: 'Download',
+      linkTypeSite: 'Site Oficial',
+      linkTypePlayStore: 'Play Store',
+      openPlayStore: 'Abrir na Play Store',
+      openSite: 'Acessar Site para Baixar',
+      downloadApp: 'Baixar App',
+      aboutApp: 'Sobre o App',
+      openLink: 'Abrir Link',
+      secondaryLinkDefault: 'Link Alternativo',
+      quickLinkNote: 'Link direto — toque para abrir',
     },
     collections: {
       title: 'Categoria',
@@ -385,7 +425,11 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       doesNotRun: 'Não roda',
       perfect: 'Perfeito',
       whatNoticed: 'O que você notou?',
-      upToSix: '(opcional, até 6)',
+      upToFifteen: '(opcional, até 15)',
+      oneReportLimitNotice:
+        'Você já enviou 1 relato para este jogo. Para enviar outro relato, apague o relato anterior primeiro (ou edite o atual).',
+      alreadyReportedBtn: 'Você já relatou este jogo',
+      deletePreviousReport: 'Apagar relato anterior',
       submitReport: 'Enviar relato',
       submittingReport: 'Enviando relato...',
       saveChanges: 'Salvar alterações',
@@ -396,6 +440,7 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
     updateModal: {
       titlePrefix: 'Nova Atualização Disponível',
       subtitle: 'Uma nova versão do DroidPort Store está pronta para instalar.',
+      changelogTitle: 'Log da Atualização',
       updateNow: 'Atualizar Agora',
       later: 'Depois',
     },
@@ -405,9 +450,27 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       inicio: 'Home',
       jogos: 'Games',
       categoria: 'Category',
+      apps: 'Apps',
       favoritos: 'Favorites',
       historico: 'History',
       configuracoes: 'Settings',
+    },
+    apps: {
+      title: 'Apps',
+      searchPlaceholder: 'Search apps...',
+      allApps: 'All apps',
+      emptyTitle: 'No apps added yet.',
+      emptyFilter: 'No apps found matching your search.',
+      linkTypeDownload: 'Download',
+      linkTypeSite: 'Website',
+      linkTypePlayStore: 'Play Store',
+      openPlayStore: 'Open on Play Store',
+      openSite: 'Open Download Site',
+      downloadApp: 'Download App',
+      aboutApp: 'About this App',
+      openLink: 'Open Link',
+      secondaryLinkDefault: 'Alternative Link',
+      quickLinkNote: 'Direct link — tap to open',
     },
     collections: {
       title: 'Category',
@@ -578,7 +641,11 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       doesNotRun: "Doesn't run",
       perfect: 'Perfect',
       whatNoticed: 'What did you notice?',
-      upToSix: '(optional, up to 6)',
+      upToFifteen: '(optional, up to 15)',
+      oneReportLimitNotice:
+        'You already submitted 1 report for this game. To post a new one, delete your previous report first (or edit the existing one).',
+      alreadyReportedBtn: 'Already reported this game',
+      deletePreviousReport: 'Delete previous report',
       submitReport: 'Submit report',
       submittingReport: 'Submitting report...',
       saveChanges: 'Save changes',
@@ -589,6 +656,7 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
     updateModal: {
       titlePrefix: 'New Update Available',
       subtitle: 'A new version of DroidPort Store is ready to install.',
+      changelogTitle: 'Update Changelog',
       updateNow: 'Update Now',
       later: 'Later',
     },
@@ -598,9 +666,27 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       inicio: 'Inicio',
       jogos: 'Juegos',
       categoria: 'Categoría',
+      apps: 'Apps',
       favoritos: 'Favoritos',
       historico: 'Historial',
       configuracoes: 'Ajustes',
+    },
+    apps: {
+      title: 'Apps',
+      searchPlaceholder: 'Buscar apps...',
+      allApps: 'Todas las apps',
+      emptyTitle: 'Aún no hay apps añadidas.',
+      emptyFilter: 'No se encontraron apps para esa búsqueda.',
+      linkTypeDownload: 'Descarga',
+      linkTypeSite: 'Sitio Web',
+      linkTypePlayStore: 'Play Store',
+      openPlayStore: 'Abrir en Play Store',
+      openSite: 'Ir al Sitio de Descarga',
+      downloadApp: 'Descargar App',
+      aboutApp: 'Sobre la App',
+      openLink: 'Abrir Enlace',
+      secondaryLinkDefault: 'Enlace Alternativo',
+      quickLinkNote: 'Enlace directo — toca para abrir',
     },
     collections: {
       title: 'Categoría',
@@ -771,7 +857,11 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       doesNotRun: 'No abre',
       perfect: 'Perfecto',
       whatNoticed: '¿Qué notaste?',
-      upToSix: '(opcional, hasta 6)',
+      upToFifteen: '(opcional, hasta 15)',
+      oneReportLimitNotice:
+        'Ya enviaste 1 reporte para este juego. Para enviar otro, borra tu reporte anterior primero (o edita el actual).',
+      alreadyReportedBtn: 'Ya reportaste este juego',
+      deletePreviousReport: 'Borrar reporte anterior',
       submitReport: 'Enviar reporte',
       submittingReport: 'Enviando reporte...',
       saveChanges: 'Guardar cambios',
@@ -782,6 +872,7 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
     updateModal: {
       titlePrefix: 'Nueva Actualización Disponible',
       subtitle: 'Una nueva versión de DroidPort Store está lista para instalar.',
+      changelogTitle: 'Registro de Cambios',
       updateNow: 'Actualizar Ahora',
       later: 'Después',
     },
