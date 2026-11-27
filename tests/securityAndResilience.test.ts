@@ -33,6 +33,11 @@ import {
   setCachedValue,
   withRetryOnTransientError,
 } from '../src/utils/supabaseResilience';
+import {
+  compareSemver,
+  isGameCompatibleWithInstalledVersion,
+  isRemoteVersionGreater,
+} from '../src/utils/versioning';
 import type { Jogo } from '../src/types/game';
 
 describe('urlSecurity — Proteção de URLs, APK Updates, Archive.org, Magnet & Intents', () => {
@@ -214,6 +219,32 @@ describe('formatters — Sanitização de Catálogo, Fotos, Vídeos e Tutoriais'
     const tutorials = parseTutorials(mockGame.tutoriais);
     assert.equal(tutorials.length, 1);
     assert.equal(tutorials[0].titulo, 'Guia Oficial');
+  });
+
+  it('preserva GIFs em data:image/gif;base64 sem quebrar na vírgula interna e mantém ordem', () => {
+    const base64Gif = 'data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7';
+    const raw = `https://cdn.example.com/1.gif, ${base64Gif}, https://cdn.example.com/clip.mp4`;
+
+    assert.deepEqual(parsePhotos(raw), [
+      'https://cdn.example.com/1.gif',
+      base64Gif,
+      'https://cdn.example.com/clip.mp4',
+    ]);
+  });
+});
+
+describe('versioning — Compatibilidade por versao_minima e SemVer', () => {
+  it('compara versões major.minor.patch e filtra jogos pelo APK instalado', () => {
+    assert.equal(compareSemver('1.0.26', '1.0.33'), -1);
+    assert.equal(compareSemver('1.0.34', '1.0.34'), 0);
+    assert.equal(compareSemver('1.1.0', '1.0.99'), 1);
+    assert.equal(isRemoteVersionGreater('1.0.35', '1.0.34'), true);
+
+    assert.equal(isGameCompatibleWithInstalledVersion('1.0.26', '1.0.33'), false);
+    assert.equal(isGameCompatibleWithInstalledVersion('1.0.33', '1.0.33'), true);
+    assert.equal(isGameCompatibleWithInstalledVersion('1.0.35', '1.0.33'), true);
+    assert.equal(isGameCompatibleWithInstalledVersion('1.0.26', null), true);
+    assert.equal(isGameCompatibleWithInstalledVersion('1.0.26', ''), true);
   });
 });
 
