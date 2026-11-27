@@ -80,6 +80,11 @@ import {
   parseSizeToBytes,
   sanitizeFolderName,
 } from './utils/formatters';
+import {
+  getRealInstalledAppVersion,
+  isGameCompatibleWithInstalledVersion,
+  isRemoteVersionGreater,
+} from './utils/versioning';
 import { APP_VERSION } from './version';
 
 export { APP_VERSION };
@@ -134,36 +139,6 @@ function extractDiscordUrlFromRow(row: unknown): string | null {
   return null;
 }
 
-function isRemoteVersionGreater(
-  remoteVersion: string,
-  currentVersion: string
-): boolean {
-  const parseParts = (v: string): number[] | null => {
-    const cleaned = v.trim().replace(/^v/i, '');
-    if (!cleaned) return null;
-    const segments = cleaned.split('.');
-    const nums = segments.map((seg) => {
-      if (!/^\d+$/.test(seg)) return NaN;
-      return Number.parseInt(seg, 10);
-    });
-    if (nums.some((n) => Number.isNaN(n))) return null;
-    return nums;
-  };
-
-  const remoteParts = parseParts(remoteVersion);
-  const currentParts = parseParts(currentVersion);
-  if (!remoteParts || !currentParts) return false;
-
-  const maxLen = Math.max(remoteParts.length, currentParts.length);
-  for (let i = 0; i < maxLen; i++) {
-    const r = remoteParts[i] ?? 0;
-    const c = currentParts[i] ?? 0;
-    if (r > c) return true;
-    if (r < c) return false;
-  }
-  return false;
-}
-
 const SUPABASE_URL = 'https://mfwzkzywxvbbonsshjgh.supabase.co';
 const SUPABASE_ANON_KEY =
   'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1md3prenl3eHZiYm9uc3NoamdoIiwicm9sZSI6ImFub24iLCJpYXQiOjE3OTQ1MjIyMTgsImV4cCI6MjExMDA5ODIxOH0.GC7FJFhSVjKaKJsackBMjLXIf4eLUnY8H2J3kDBbi6M';
@@ -183,9 +158,22 @@ export default function App() {
     tamanho: t.catalog.sortSize,
   };
 
-  const [jogos, setJogos] = useState<Jogo[]>([]);
+  const [installedAppVersion, setInstalledAppVersion] =
+    useState<string>(APP_VERSION);
+  const [rawJogos, setRawJogos] = useState<Jogo[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [error, setError] = useState<string | null>(null);
+
+  const jogos = useMemo(
+    () =>
+      rawJogos.filter((jogo) =>
+        isGameCompatibleWithInstalledVersion(
+          installedAppVersion,
+          jogo.versao_minima
+        )
+      ),
+    [rawJogos, installedAppVersion]
+  );
 
   const [categorias, setCategorias] = useState<CategoriaColecao[]>([]);
   const [categoriaVinculos, setCategoriaVinculos] = useState<
@@ -245,6 +233,31 @@ export default function App() {
   const [autoOpenReportGameId, setAutoOpenReportGameId] = useState<string | null>(
     null
   );
+
+  // Lê a versão real instalada no aparelho (PackageInfo.versionName no Android / APP_VERSION na web)
+  useEffect(() => {
+    let active = true;
+    void getRealInstalledAppVersion().then((realVer) => {
+      if (active) {
+        setInstalledAppVersion(realVer);
+      }
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  useEffect(() => {
+    if (
+      selectedGame &&
+      !isGameCompatibleWithInstalledVersion(
+        installedAppVersion,
+        selectedGame.versao_minima
+      )
+    ) {
+      setSelectedGame(null);
+    }
+  }, [installedAppVersion, selectedGame]);
 
   // Track second Supabase auth state & Capacitor deep-link callback (droidport://login-callback)
   useEffect(() => {
@@ -365,6 +378,8 @@ export default function App() {
         'up-to-date' | 'update-available' | 'error'
       > => {
         try {
+          const currentInstalledVersion = await getRealInstalledAppVersion();
+
           const { data, error: configError } = await supabase
             .from('config')
             .select('*')
@@ -446,13 +461,16 @@ export default function App() {
             }
           };
 
-          // Se a APP_VERSION do aplicativo instalado for MAIOR que a versão salva no Supabase,
+          // Se a versão instalada for MAIOR que a versão salva no Supabase,
           // sincroniza a tabela `config` e garante a solicitação pendente na tabela `aceitar`.
-          if (!versaoAtual || isRemoteVersionGreater(APP_VERSION, versaoAtual)) {
+          if (
+            !versaoAtual ||
+            isRemoteVersionGreater(currentInstalledVersion, versaoAtual)
+          ) {
             try {
               const updateBuilder = supabase
                 .from('config')
-                .update({ versao_atual: APP_VERSION });
+                .update({ versao_atual: currentInstalledVersion });
 
               let updateRes;
               if (row.id !== undefined && row.id !== null) {
@@ -479,10 +497,16 @@ export default function App() {
               // Ignora silenciosamente caso RLS/GRANT bloqueie escrita anônima
             }
 
-            await ensurePendingAcceptanceRow(APP_VERSION, configLinkApk);
+            await ensurePendingAcceptanceRow(
+              currentInstalledVersion,
+              configLinkApk
+            );
 
             try {
-              localStorage.setItem(INSTALLED_VERSION_STORAGE_KEY, APP_VERSION);
+              localStorage.setItem(
+                INSTALLED_VERSION_STORAGE_KEY,
+                currentInstalledVersion
+              );
             } catch {
               // Ignore storage errors
             }
@@ -536,7 +560,7 @@ export default function App() {
             const approvedUpdate = parsedRequests.find(
               (item) =>
                 item.aceito &&
-                isRemoteVersionGreater(item.versao, APP_VERSION) &&
+                isRemoteVersionGreater(item.versao, currentInstalledVersion) &&
                 Boolean(item.linkApk)
             );
 
@@ -555,7 +579,7 @@ export default function App() {
             // cria a solicitação pendente (`aceito: false`) para aparecer no app Admin.
             if (
               versaoAtual &&
-              isRemoteVersionGreater(versaoAtual, APP_VERSION)
+              isRemoteVersionGreater(versaoAtual, currentInstalledVersion)
             ) {
               const alreadyListed = parsedRequests.some(
                 (item) => item.versao === versaoAtual
@@ -571,7 +595,7 @@ export default function App() {
           // Fallback caso a tabela `aceitar` ainda não tenha sido criada no Supabase
           if (
             versaoAtual &&
-            isRemoteVersionGreater(versaoAtual, APP_VERSION) &&
+            isRemoteVersionGreater(versaoAtual, currentInstalledVersion) &&
             configLinkApk
           ) {
             if (showPromptIfAvailable) {
@@ -634,7 +658,7 @@ export default function App() {
       }
 
       const loadedJogos = (data as Jogo[]) || [];
-      setJogos(loadedJogos);
+      setRawJogos(loadedJogos);
 
       for (const item of loadedJogos) {
         if (isValidHttpUrl(item.discord)) {
@@ -1987,7 +2011,7 @@ export default function App() {
               {t.settings.title}
             </h2>
             <SettingsView
-              appVersion={APP_VERSION}
+              appVersion={installedAppVersion}
               discordUrl={discordUrl}
               discordLoadError={discordLoadError}
               favoritesCount={favorites.length}

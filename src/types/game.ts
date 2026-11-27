@@ -15,6 +15,7 @@ export interface Jogo {
   titulo: string;
   categoria: string;
   versao: string;
+  versao_minima?: string | null;
   tamanho: string;
   destaque: boolean;
   descricao: string;
