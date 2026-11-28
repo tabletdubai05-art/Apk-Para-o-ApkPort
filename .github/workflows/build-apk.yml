@@ -375,6 +375,32 @@ jobs:
                       }
                   }
 
+                  if (lower.startsWith("market://")) {
+                      Context context = view.getContext();
+                      try {
+                          Uri marketUri = Uri.parse(url);
+                          if (url.contains("#Intent;")) {
+                              return true;
+                          }
+                          Intent marketIntent = new Intent(Intent.ACTION_VIEW, marketUri);
+                          marketIntent.addCategory(Intent.CATEGORY_BROWSABLE);
+                          marketIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                          context.startActivity(marketIntent);
+                          return true;
+                      } catch (ActivityNotFoundException ignored) {
+                          try {
+                              String webFallback = "https://play.google.com/store/apps/" + url.substring("market://".length());
+                              Intent webIntent = new Intent(Intent.ACTION_VIEW, Uri.parse(webFallback));
+                              webIntent.addCategory(Intent.CATEGORY_BROWSABLE);
+                              webIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK);
+                              context.startActivity(webIntent);
+                          } catch (ActivityNotFoundException ignored2) {
+                              // Nenhum navegador disponível
+                          }
+                          return true;
+                      }
+                  }
+
                   return false;
               }
           }

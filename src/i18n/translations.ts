@@ -161,6 +161,7 @@ export interface AppTranslations {
     tutorialVideos: string;
     video: string;
     photoGallery: string;
+    externalLinkLabel: string;
   };
   community: {
     sectionTitle: string;
@@ -376,6 +377,7 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       tutorialVideos: 'Vídeos Tutoriais',
       video: 'Vídeo',
       photoGallery: 'Galeria de Fotos',
+      externalLinkLabel: 'Link externo',
     },
     community: {
       sectionTitle: 'Roda no seu celular?',
@@ -592,6 +594,7 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       tutorialVideos: 'Tutorial Videos',
       video: 'Video',
       photoGallery: 'Photo Gallery',
+      externalLinkLabel: 'External link',
     },
     community: {
       sectionTitle: 'Does it run on your phone?',
@@ -808,6 +811,7 @@ export const TRANSLATIONS: Record<AppLanguage, AppTranslations> = {
       tutorialVideos: 'Videos Tutoriales',
       video: 'Video',
       photoGallery: 'Galería de Fotos',
+      externalLinkLabel: 'Enlace externo',
     },
     community: {
       sectionTitle: '¿Corre en tu celular?',

@@ -14,6 +14,7 @@ import {
   normalizeArchiveOrgDownloadUrl,
   parseSafeArchiveOrgDownloadUrl,
   sanitizeDirectDownloadUrl,
+  sanitizeExternalItemUrl,
   sanitizeMagnetUri,
   sanitizeP2PTorrentUrl,
 } from '../utils/urlSecurity';
@@ -155,6 +156,26 @@ export async function openSystemDownloadManager(
   const directUrl = await resolveDirectDownloadUrl(url);
   if (!directUrl) return false;
   return openUrlInSystemBrowser(directUrl);
+}
+
+export async function openExternalItemLink(
+  url?: string | null
+): Promise<boolean> {
+  const safeUrl = sanitizeExternalItemUrl(url);
+  if (!safeUrl) return false;
+
+  if (Capacitor.isNativePlatform()) {
+    // Dispara shouldOverrideUrlLoading -> Bridge.launchIntent -> Intent.ACTION_VIEW / Uri.parse(url)
+    // abrindo diretamente no navegador externo ou no app da Play Store sem sair da tela atual.
+    window.location.href = safeUrl;
+    return true;
+  }
+
+  const opened = window.open(safeUrl, '_blank', 'noopener,noreferrer');
+  if (!opened) {
+    window.open(safeUrl, '_system');
+  }
+  return true;
 }
 
 export async function startHybridDownload(

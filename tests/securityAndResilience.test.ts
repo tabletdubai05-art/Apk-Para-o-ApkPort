@@ -5,11 +5,13 @@ import {
   buildSafeAndroidP2PIntentUrl,
   buildSafeArchiveServerUrl,
   computeSha256Hex,
+  isPlayStoreUrl,
   parseSafeArchiveOrgDownloadUrl,
   parseSafeYoutubeEmbedUrl,
   sanitizeApkUpdateUrl,
   sanitizeDirectDownloadUrl,
   sanitizeDiscordUrl,
+  sanitizeExternalItemUrl,
   sanitizeImageUrl,
   sanitizeMagnetUri,
   sanitizeP2PTorrentUrl,
@@ -230,6 +232,67 @@ describe('formatters — Sanitização de Catálogo, Fotos, Vídeos e Tutoriais'
       base64Gif,
       'https://cdn.example.com/clip.mp4',
     ]);
+  });
+
+  it('suporta itens tipo "link" sem herdar tamanho/torrent e preserva tipo "normal"', () => {
+    const mockWithLinks: Jogo = {
+      id: 99,
+      titulo: 'Game With Companion',
+      categoria: 'Ação',
+      versao: '1.0.0',
+      tamanho: '1.2 GB',
+      destaque: false,
+      descricao: 'Teste',
+      capa_url: 'https://cdn.example.com/cover.jpg',
+      torrent_url: 'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567',
+      arquivos: [
+        {
+          tipo: 'link',
+          nome: 'Baixar App na Play Store',
+          url: 'https://play.google.com/store/apps/details?id=org.emulator.app',
+          tamanho: '50 MB',
+          torrent_url: 'magnet:?xt=urn:btih:abcdef0123456789abcdef0123456789abcdef01',
+        },
+        {
+          tipo: 'link',
+          nome: 'Link Malicioso',
+          url: 'javascript:alert(1)',
+        },
+        {
+          nome: 'APK Principal',
+          tamanho: '1.2 GB',
+          url: 'https://archive.org/download/game/game.apk',
+        },
+      ],
+    };
+
+    const resolved = resolveGameFiles(mockWithLinks);
+    assert.equal(resolved.length, 2);
+
+    assert.equal(resolved[0].tipo, 'link');
+    assert.equal(resolved[0].nome, 'Baixar App na Play Store');
+    assert.equal(
+      resolved[0].url,
+      'https://play.google.com/store/apps/details?id=org.emulator.app'
+    );
+    assert.equal(resolved[0].tamanho, undefined);
+    assert.equal(resolved[0].torrent_url, null);
+    assert.equal(isPlayStoreUrl(resolved[0].url), true);
+
+    assert.equal(resolved[1].tipo, 'normal');
+    assert.equal(resolved[1].nome, 'APK Principal');
+    assert.equal(resolved[1].tamanho, '1.2 GB');
+    assert.equal(
+      resolved[1].torrent_url,
+      'magnet:?xt=urn:btih:0123456789abcdef0123456789abcdef01234567'
+    );
+
+    assert.equal(
+      sanitizeExternalItemUrl('market://details?id=com.example.app'),
+      'market://details?id=com.example.app'
+    );
+    assert.equal(sanitizeExternalItemUrl('intent://evil#Intent;end'), null);
+    assert.equal(isPlayStoreUrl('https://example.com/emulator'), false);
   });
 });
 

@@ -367,6 +367,43 @@ export function sanitizeDirectDownloadUrl(rawUrl: unknown): string | null {
   });
 }
 
+const SAFE_MARKET_URI_RE = /^market:\/\/(?:details|search)\?[a-zA-Z0-9_=&.%+-]+$/i;
+
+export function isPlayStoreUrl(rawUrl?: string | null): boolean {
+  if (typeof rawUrl !== 'string') return false;
+  const trimmed = rawUrl.trim();
+  if (!trimmed) return false;
+  if (/^market:\/\//i.test(trimmed)) return true;
+  try {
+    const parsed = new URL(trimmed);
+    const host = parsed.hostname.toLowerCase();
+    return host === 'play.google.com' || host.endsWith('.play.google.com');
+  } catch {
+    return false;
+  }
+}
+
+export function sanitizeExternalItemUrl(rawUrl: unknown): string | null {
+  if (typeof rawUrl !== 'string') return null;
+  const trimmed = rawUrl.trim();
+  if (!trimmed || CONTROL_CHARS_RE.test(trimmed) || INJECTED_INTENT_RE.test(trimmed)) {
+    return null;
+  }
+
+  if (/^market:\/\//i.test(trimmed)) {
+    if (trimmed.includes('#') || !SAFE_MARKET_URI_RE.test(trimmed)) {
+      return null;
+    }
+    return trimmed;
+  }
+
+  return sanitizeHttpUrl(trimmed, {
+    requireHttps: false,
+    blockPrivateHosts: true,
+    rejectIpLiterals: true,
+  });
+}
+
 export function sanitizeMagnetUri(rawUrl: unknown): string | null {
   if (typeof rawUrl !== 'string') return null;
   const trimmed = rawUrl.trim();

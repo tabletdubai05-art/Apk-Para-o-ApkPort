@@ -2,6 +2,7 @@ import type { Jogo, JogoArquivo, TutorialItem } from '../types/game';
 import {
   parseSafeYoutubeEmbedUrl,
   sanitizeDirectDownloadUrl,
+  sanitizeExternalItemUrl,
   sanitizeGalleryMediaUrl,
   sanitizeMediaUrl,
   sanitizeP2PTorrentUrl,
@@ -247,23 +248,57 @@ export function resolveGameFiles(jogo: Jogo): JogoArquivo[] {
   }
 
   const fallbackTorrent = sanitizeP2PTorrentUrl(jogo.torrent_url);
+  let fallbackTorrentUsed = false;
 
   if (Array.isArray(rawArquivos) && rawArquivos.length > 0) {
     const valid = rawArquivos
       .map((item, idx) => {
         if (!item || typeof item !== 'object') return null;
+
+        const rawTipo =
+          typeof item.tipo === 'string' ? item.tipo.trim().toLowerCase() : '';
+        const isLinkItem = rawTipo === 'link';
+
+        if (isLinkItem) {
+          const safeLinkUrl = sanitizeExternalItemUrl(item.url);
+          if (!safeLinkUrl) {
+            return null;
+          }
+
+          const linkEntry: JogoArquivo = {
+            tipo: 'link',
+            nome:
+              (typeof item.nome === 'string' && item.nome.trim()) ||
+              `Link ${idx + 1}`,
+            url: safeLinkUrl,
+            torrent_url: null,
+          };
+          return linkEntry;
+        }
+
         const safeUrl = sanitizeDirectDownloadUrl(item.url) ?? '';
-        const safeItemTorrent =
-          sanitizeP2PTorrentUrl(item.torrent_url) ??
-          (idx === 0 ? fallbackTorrent : null);
+        const explicitTorrent = sanitizeP2PTorrentUrl(item.torrent_url);
+        let safeItemTorrent = explicitTorrent;
+        if (!safeItemTorrent && !fallbackTorrentUsed && fallbackTorrent) {
+          safeItemTorrent = fallbackTorrent;
+          fallbackTorrentUsed = true;
+        } else if (explicitTorrent) {
+          fallbackTorrentUsed = true;
+        }
 
         if (!safeUrl && !safeItemTorrent) {
           return null;
         }
 
         const entry: JogoArquivo = {
-          nome: (typeof item.nome === 'string' && item.nome.trim()) || `Arquivo ${idx + 1}`,
-          tamanho: (typeof item.tamanho === 'string' ? item.tamanho : jogo.tamanho || '').trim(),
+          tipo: 'normal',
+          nome:
+            (typeof item.nome === 'string' && item.nome.trim()) ||
+            `Arquivo ${idx + 1}`,
+          tamanho: (typeof item.tamanho === 'string'
+            ? item.tamanho
+            : jogo.tamanho || ''
+          ).trim(),
           url: safeUrl,
           torrent_url: safeItemTorrent,
         };
@@ -280,6 +315,7 @@ export function resolveGameFiles(jogo: Jogo): JogoArquivo[] {
   if (safeWebseed || fallbackTorrent) {
     return [
       {
+        tipo: 'normal',
         nome: 'APK Principal',
         tamanho: jogo.tamanho || '',
         url: safeWebseed,

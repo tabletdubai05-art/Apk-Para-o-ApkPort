@@ -998,6 +998,7 @@ export default function App() {
 
   const handleStartFileDownload = useCallback(
     (jogo: Jogo, arquivo: JogoArquivo, index: number) => {
+      if (String(arquivo.tipo ?? '').trim().toLowerCase() === 'link') return;
       const task = createFileTask(jogo, arquivo, index);
 
       setDownloads((prev) => ({
@@ -1012,6 +1013,7 @@ export default function App() {
 
   const handleStartP2PDownload = useCallback(
     (jogo: Jogo, arquivo: JogoArquivo, index: number) => {
+      if (String(arquivo.tipo ?? '').trim().toLowerCase() === 'link') return;
       const torrentUrl = arquivo.torrent_url?.trim();
       if (!torrentUrl) return;
 
@@ -1029,9 +1031,12 @@ export default function App() {
 
   const handleDownloadAll = useCallback(
     (jogo: Jogo, arquivos: JogoArquivo[]) => {
-      if (arquivos.length === 0) return;
+      const normalArquivos = arquivos.filter(
+        (item) => String(item.tipo ?? '').trim().toLowerCase() !== 'link'
+      );
+      if (normalArquivos.length === 0) return;
 
-      const tasks = arquivos.map((arquivo, idx) =>
+      const tasks = normalArquivos.map((arquivo, idx) =>
         createFileTask(jogo, arquivo, idx)
       );
 

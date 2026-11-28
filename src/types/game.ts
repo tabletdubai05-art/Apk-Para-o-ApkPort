@@ -1,4 +1,7 @@
+export type JogoArquivoTipo = 'normal' | 'link';
+
 export interface JogoArquivo {
+  tipo?: JogoArquivoTipo | string | null;
   nome: string;
   tamanho?: string;
   url: string;

@@ -5,15 +5,20 @@ import {
   CheckCircle2,
   Copy,
   Download,
+  ExternalLink,
   FileArchive,
   Heart,
   Info,
   PlayCircle,
   RotateCcw,
+  Store,
   Zap,
 } from 'lucide-react';
 import { usePreferences } from '../context/PreferencesContext';
-import { copyTextToClipboard } from '../services/downloadEngine';
+import {
+  copyTextToClipboard,
+  openExternalItemLink,
+} from '../services/downloadEngine';
 import type { DownloadTask, Jogo, JogoArquivo } from '../types/game';
 import {
   buildDownloadTaskId,
@@ -25,7 +30,9 @@ import {
   resolveGameFiles,
 } from '../utils/formatters';
 import {
+  isPlayStoreUrl,
   sanitizeDirectDownloadUrl,
+  sanitizeExternalItemUrl,
   sanitizeP2PTorrentUrl,
 } from '../utils/urlSecurity';
 import { DeviceCompatibilitySection } from './DeviceCompatibilitySection';
@@ -66,8 +73,11 @@ export function GameDetailsView({
   const video = parseVideoSource(jogo.video_url);
   const galleryMedia = parseGalleryMedia(jogo.fotos_urls);
   const files = resolveGameFiles(jogo);
+  const normalFiles = files.filter((item) => item.tipo !== 'link');
   const tutorials = parseTutorials(jogo.tutoriais);
-  const hasAnyTorrent = files.some((item) => Boolean(item.torrent_url?.trim()));
+  const hasAnyTorrent = normalFiles.some((item) =>
+    Boolean(item.torrent_url?.trim())
+  );
 
   const copyToClipboard = async (text: string, key: string) => {
     const ok = await copyTextToClipboard(text);
@@ -159,10 +169,10 @@ export function GameDetailsView({
                   {t.details.availableFiles} ({files.length})
                 </h2>
 
-                {files.length > 1 && (
+                {normalFiles.length > 1 && (
                   <button
                     type="button"
-                    onClick={() => onDownloadAll(jogo, files)}
+                    onClick={() => onDownloadAll(jogo, normalFiles)}
                     className="min-h-[44px] px-4 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] purple:from-[#7E22CE] purple:to-[#C026D3] purple:hover:from-[#6B21A8] purple:hover:to-[#A21CAF] text-white text-xs sm:text-sm font-bold inline-flex items-center gap-2 shadow-md shadow-[#6366F1]/25 purple:shadow-[#9333EA]/30 active:scale-[0.98] transition-all shrink-0"
                   >
                     <Download className="w-4 h-4" />
@@ -178,6 +188,54 @@ export function GameDetailsView({
               ) : (
                 <div className="space-y-2.5">
                   {files.map((arquivo, index) => {
+                    const isLinkItem =
+                      (typeof arquivo.tipo === 'string' &&
+                        arquivo.tipo.trim().toLowerCase() === 'link') ||
+                      false;
+
+                    if (isLinkItem) {
+                      const externalUrl = sanitizeExternalItemUrl(arquivo.url);
+                      if (!externalUrl) return null;
+                      const playStore = isPlayStoreUrl(externalUrl);
+                      const ItemIcon = playStore ? Store : ExternalLink;
+
+                      return (
+                        <div
+                          key={`link-${index}-${arquivo.nome}`}
+                          className="rounded-2xl bg-[#F4F5F9] dark:bg-[#0F0E13] purple:bg-[#170E2B] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] p-3.5 space-y-3"
+                        >
+                          <div className="flex items-center gap-3 min-w-0">
+                            <div className="w-10 h-10 rounded-xl bg-white dark:bg-[#1B1924] purple:bg-[#20143A] border border-[#E2E4EC] dark:border-[#2A2738] purple:border-[#392466] flex items-center justify-center text-[#6366F1] dark:text-[#8B5CF6] purple:text-[#C084FC] shrink-0">
+                              <ItemIcon className="w-5 h-5" />
+                            </div>
+                            <div className="min-w-0 flex-1">
+                              <p className="text-sm font-bold text-[#111827] dark:text-white truncate">
+                                {arquivo.nome}
+                              </p>
+                              <p className="text-xs text-[#525866] dark:text-[#9CA3AF] purple:text-[#C4B5FD]">
+                                {playStore
+                                  ? t.apps.linkTypePlayStore
+                                  : t.details.externalLinkLabel}
+                              </p>
+                            </div>
+                          </div>
+
+                          <button
+                            type="button"
+                            onClick={() => void openExternalItemLink(externalUrl)}
+                            className="w-full min-h-[44px] px-4 rounded-xl bg-gradient-to-r from-[#6366F1] to-[#8B5CF6] hover:from-[#5558E6] hover:to-[#7C4DFF] purple:from-[#7E22CE] purple:to-[#C026D3] purple:hover:from-[#6B21A8] purple:hover:to-[#A21CAF] text-white text-xs sm:text-sm font-bold inline-flex items-center justify-center gap-2 shadow-md shadow-[#6366F1]/25 purple:shadow-[#9333EA]/30 active:scale-[0.98] transition-all"
+                          >
+                            <ExternalLink className="w-4 h-4 shrink-0" />
+                            <span>
+                              {playStore
+                                ? t.apps.openPlayStore
+                                : t.apps.openLink}
+                            </span>
+                          </button>
+                        </div>
+                      );
+                    }
+
                     const taskId = buildDownloadTaskId(gameId, arquivo, index);
                     const p2pTaskId = buildP2PDownloadTaskId(gameId, arquivo, index);
                     const directTask = downloads[taskId];
